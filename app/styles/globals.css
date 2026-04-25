@@ -1,0 +1,242 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  body {
+    font-family: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #1d1d1f;
+    background-color: #ffffff;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+}
+
+@layer components {
+  /* Wallet Adapter Overrides — Apple Dark Nav Style */
+  .wallet-adapter-button {
+    background-color: #1d1d1f !important;
+    color: #ffffff !important;
+    font-family: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    letter-spacing: -0.12px !important;
+    border-radius: 8px !important;
+    padding: 6px 12px !important;
+    height: auto !important;
+    line-height: 1 !important;
+    border: none !important;
+  }
+
+  .wallet-adapter-button:hover {
+    background-color: #2a2a2c !important;
+  }
+
+  .wallet-adapter-button:active {
+    transform: scale(0.95) !important;
+  }
+
+  .wallet-adapter-dropdown-list {
+    background-color: #1d1d1f !important;
+    border-radius: 8px !important;
+    padding: 8px !important;
+  }
+
+  .wallet-adapter-dropdown-list-item {
+    color: #ffffff !important;
+    font-family: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+    font-size: 12px !important;
+    padding: 8px 12px !important;
+    border-radius: 6px !important;
+  }
+
+  .wallet-adapter-dropdown-list-item:hover {
+    background-color: #2a2a2c !important;
+  }
+
+  .wallet-adapter-modal-wrapper {
+    background: rgba(0, 0, 0, 0.4) !important;
+    backdrop-filter: blur(12px) !important;
+  }
+
+  .wallet-adapter-modal {
+    background-color: #ffffff !important;
+    border-radius: 18px !important;
+    box-shadow: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px !important;
+  }
+
+  .wallet-adapter-modal-title {
+    color: #1d1d1f !important;
+    font-family: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+    font-size: 21px !important;
+    font-weight: 600 !important;
+  }
+
+  .wallet-adapter-modal-list-more {
+    color: #0066cc !important;
+  }
+
+  .wallet-adapter-modal-button-close {
+    background-color: rgba(210, 210, 215, 0.64) !important;
+    color: #1d1d1f !important;
+  }
+
+  .apple-pill {
+    @apply inline-flex items-center justify-center bg-action-blue text-white font-body text-[17px] font-normal tracking-tight-headline leading-none rounded-pill px-[22px] py-[11px] transition-transform duration-150;
+  }
+  
+  .apple-pill:hover {
+    @apply opacity-90;
+  }
+  
+  .apple-pill:active {
+    transform: scale(0.95);
+  }
+  
+  .apple-pill-ghost {
+    @apply inline-flex items-center justify-center bg-transparent text-action-blue font-body text-[17px] font-normal tracking-tight-headline leading-none rounded-pill px-[22px] py-[11px] border border-action-blue transition-transform duration-150;
+  }
+  
+  .apple-pill-ghost:active {
+    transform: scale(0.95);
+  }
+  
+  .apple-dark-btn {
+    @apply inline-flex items-center justify-center bg-ink text-white font-body text-sm font-normal tracking-tight-caption leading-none rounded-utility px-[15px] py-2 transition-transform duration-150;
+  }
+  
+  .apple-dark-btn:active {
+    transform: scale(0.95);
+  }
+  
+  .apple-pearl-btn {
+    @apply inline-flex items-center justify-center bg-pearl text-ink/80 font-body text-sm font-normal tracking-tight-caption leading-none rounded-chip px-[14px] py-[8px] transition-transform duration-150;
+    border: 3px solid rgba(0, 0, 0, 0.04);
+  }
+  
+  .apple-pearl-btn:active {
+    transform: scale(0.95);
+  }
+  
+  .apple-tile-light {
+    @apply w-full bg-white;
+  }
+  
+  .apple-tile-parchment {
+    @apply w-full bg-parchment;
+  }
+  
+  .apple-tile-dark {
+    @apply w-full bg-tile-dark-1 text-white;
+  }
+  
+  .apple-tile-dark-alt {
+    @apply w-full bg-tile-dark-2 text-white;
+  }
+  
+  .apple-nav-global {
+    @apply w-full bg-black text-white;
+  }
+  
+  .apple-nav-sub {
+    @apply w-full bg-parchment/80 backdrop-blur-md;
+  }
+  
+  .apple-card {
+    @apply bg-white rounded-card border border-hairline;
+  }
+  
+  .apple-product-shadow {
+    box-shadow: rgba(0, 0, 0, 0.22) 3px 5px 30px 0px;
+  }
+  
+  .apple-focus-ring:focus {
+    outline: 2px solid #0071e3;
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .text-hero {
+    font-size: 56px;
+    font-weight: 600;
+    line-height: 1.07;
+    letter-spacing: -0.28px;
+  }
+  
+  .text-tile-headline {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1.10;
+  }
+  
+  .text-section {
+    font-size: 34px;
+    font-weight: 600;
+    line-height: 1.47;
+    letter-spacing: -0.374px;
+  }
+  
+  .text-lead {
+    font-size: 28px;
+    font-weight: 400;
+    line-height: 1.14;
+    letter-spacing: 0.196px;
+  }
+  
+  .text-subtagline {
+    font-size: 21px;
+    font-weight: 400;
+    line-height: 1.19;
+    letter-spacing: 0.231px;
+  }
+  
+  .text-body-apple {
+    font-size: 17px;
+    font-weight: 400;
+    line-height: 1.47;
+    letter-spacing: -0.374px;
+  }
+  
+  .text-body-strong {
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.24;
+    letter-spacing: -0.374px;
+  }
+  
+  .text-caption-apple {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.43;
+    letter-spacing: -0.224px;
+  }
+  
+  .text-caption-strong {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.29;
+    letter-spacing: -0.224px;
+  }
+  
+  .text-fine {
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.00;
+    letter-spacing: -0.12px;
+  }
+  
+  .text-micro {
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.30;
+    letter-spacing: -0.08px;
+  }
+}
