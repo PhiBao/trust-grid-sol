@@ -27,6 +27,17 @@ export interface Feedback {
   responseUri: string | null;
   createdAt: number;
   index: number;
+  pda: string;
+}
+
+interface RawFeedback {
+  agentId: number;
+  client: string;
+  value: number;
+  tag: string;
+  responseUri: string | null;
+  createdAt: number;
+  index: number;
 }
 
 export interface Task {
@@ -132,7 +143,7 @@ function decodeTask(data: Buffer): Task | null {
   }
 }
 
-function tryDecodeFeedback(data: Buffer): Feedback | null {
+function tryDecodeFeedback(data: Buffer): RawFeedback | null {
   try {
     if (data.length < 60) return null;
     let offset = 8;
@@ -211,19 +222,17 @@ export async function fetchReputation(agentId: number): Promise<AgentReputation 
 
 export async function fetchFeedbacksForAgent(agentId: number): Promise<Feedback[]> {
   const connection = new Connection(RPC_URL, "confirmed");
-  // Fetch all program accounts and filter client-side (small dataset)
   const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
     commitment: "confirmed",
-    filters: [{ dataSize: 8 + 8 + 32 + 1 + 4 + 50 + 1 + 4 + 200 + 8 + 8 }], // max Feedback size
+    filters: [{ dataSize: 8 + 8 + 32 + 1 + 4 + 50 + 1 + 4 + 200 + 8 + 8 }],
   });
   const feedbacks: Feedback[] = [];
-  for (const { account } of accounts) {
+  for (const { pubkey, account } of accounts) {
     const fb = tryDecodeFeedback(account.data);
     if (fb && fb.agentId === agentId) {
-      feedbacks.push(fb);
+      feedbacks.push({ ...fb, pda: pubkey.toBase58() });
     }
   }
-  // Sort by newest first
   return feedbacks.sort((a, b) => b.createdAt - a.createdAt);
 }
 

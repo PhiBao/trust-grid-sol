@@ -19,9 +19,11 @@ trustgrid-solana/
 │   └── src/lib.rs                # Identity, Reputation, Escrow programs
 ├── app/                          # Next.js frontend (Apple Design System)
 │   ├── pages/                    # Routes: /, /agent, /tasks, /network, /dashboard
-│   ├── components/               # Layout, AgentNetworkGraph, WalletButton
-│   ├── lib/                      # On-chain data fetching + transactions
+│   ├── components/               # Layout, AgentNetworkGraph, WalletButton, Toast
+│   ├── lib/                      # On-chain data fetching + transactions + constants
 │   └── styles/                   # Tailwind CSS with Apple tokens
+├── cli/                          # Terminal-first interface + MCP server
+│   └── trustgrid.ts              # CLI commands + MCP entry point
 ├── x402/                         # x402 payment integration
 │   ├── solana.ts                 # SVM facilitator + middleware
 │   └── server.ts                 # Express x402 server
@@ -36,7 +38,7 @@ trustgrid-solana/
 | Page | Route | Description |
 |------|-------|-------------|
 | Marketplace | `/` | Browse agents with category filters |
-| Agent Detail | `/agent?id=X` | Full profile, reputation, feedback list, hire modal |
+| Agent Detail | `/agent?id=X` | Full profile, reputation, feedback list, hire modal, tx links |
 | Tasks | `/tasks` | Browse all tasks with status filters |
 | Network | `/network` | Force-directed graph visualization |
 | Dashboard | `/dashboard` | Wallet stats, my tasks/agents, register agent form |
@@ -74,13 +76,64 @@ npm run facilitator
 ## Vercel Deployment
 
 ```bash
-# 1. Make sure next.config.js does NOT have output: 'export'
-# 2. From the app/ directory:
 cd app
 vercel --prod
 ```
 
-**Important:** Do not use `output: 'export'` for Vercel. Vercel's Next.js builder handles SSR natively.
+**Important:** `next.config.js` does NOT have `output: 'export'`. Vercel's Next.js builder handles SSR natively.
+
+## CLI — Terminal-First Interface
+
+```bash
+# List agents
+npx ts-node --transpile-only cli/trustgrid.ts agents
+
+# Agent detail with reputation & feedback
+npx ts-node --transpile-only cli/trustgrid.ts agent 1
+
+# List tasks
+npx ts-node --transpile-only cli/trustgrid.ts tasks
+
+# Register a new agent
+npx ts-node --transpile-only cli/trustgrid.ts register \
+  --name "My Agent" \
+  --uri "https://trustgrid.xyz/agents/my-agent.json" \
+  --skill "smart_contract_audit" \
+  --category "security" \
+  --framework "rust" \
+  --price "1.0" \
+  --endpoint "https://my-agent.trustgrid.xyz/mcp"
+
+# Hire an agent (create task)
+npx ts-node --transpile-only cli/trustgrid.ts hire \
+  --agent 1 \
+  --amount 1.0 \
+  --uri "https://task.trustgrid.xyz/task-42.json"
+
+# Give feedback
+npx ts-node --transpile-only cli/trustgrid.ts feedback \
+  --agent 1 \
+  --value 5 \
+  --tag "excellent"
+
+# Start MCP server for AI integration
+npx ts-node --transpile-only cli/trustgrid.ts mcp
+```
+
+### MCP Server
+
+The `mcp` command starts a Model Context Protocol server that exposes 6 tools to AI agents:
+
+| Tool | Action |
+|------|--------|
+| `trustgrid_list_agents` | List all registered agents |
+| `trustgrid_get_agent` | Get agent details by ID |
+| `trustgrid_list_tasks` | List all tasks |
+| `trustgrid_register_agent` | Register a new agent |
+| `trustgrid_hire_agent` | Create a task to hire an agent |
+| `trustgrid_give_feedback` | Submit feedback for an agent |
+
+Connect to Claude Desktop, Cursor, or any MCP client via stdio.
 
 ## Frontend Features
 
@@ -92,11 +145,26 @@ All UI data is fetched live from Solana devnet — no mocks:
 - **Tasks**: `fetchTasks()` iterates task counter and decodes each `Task` PDA
 - **Network Graph**: Canvas physics simulation with category-based coloring
 
+### UI Polish
+- **Search & Filter**: Marketplace has real-time search by name/skill/category + category pill filters
+- **Sort Tasks**: Task board supports sorting by newest, oldest, amount high→low, amount low→high
+- **Reputation Preview**: Agent cards show star rating and review count fetched live from on-chain reputation PDAs
+- **Skeleton Loading**: All data-heavy pages show Apple-style skeleton placeholders while fetching from devnet
+- **Empty States**: Every list has a contextual empty state with icon and next-step guidance
+- **Styled Selects**: Custom CSS for `<select>` dropdowns with rounded pills, hover states, and focus rings
+- **Network Graph Interactivity**: Click nodes to navigate to agent pages, drag to rearrange, hover for tooltips
+
 ### Interactive Features
-- **Hire Agent**: Opens modal on agent detail page → create task with USDC escrow
-- **Give Feedback**: Star rating + tag → submits on-chain `give_feedback` instruction
-- **Register Agent**: Dashboard form → submits on-chain `register_agent` instruction
-- **Task Creation**: USDC amount + URI → simulation-checked before wallet prompt
+- **Hire Agent**: Opens modal on agent detail page → create task with USDC escrow → shows clickable SolanaFM tx link
+- **Give Feedback**: Star rating + tag → submits on-chain `give_feedback` instruction → shows clickable tx link
+- **Register Agent**: Dashboard form → submits on-chain `register_agent` instruction → shows clickable tx link
+- **Task Creation**: USDC amount + URI → simulation-checked before wallet prompt → shows clickable tx link
+
+### Transaction Links
+Every on-chain action shows a toast with a **"View Tx →"** link to SolanaFM explorer:
+```
+Feedback submitted on-chain!  [View Tx →]
+```
 
 ### Transaction Safety
 `sendTxRobust()` in `lib/transactions.ts`:
@@ -114,6 +182,9 @@ Removed `output: 'export'` to support SSR on Vercel. Dynamic wallet adapter comp
 
 ### Wallet adapter hydration fix
 `WalletMultiButton` is dynamically imported with `ssr: false` in `components/WalletButton.tsx`. This prevents React hydration errors.
+
+### Single source of truth for Program ID
+`app/lib/constants.ts` exports `PROGRAM_ID`, `PROGRAM_ID_STRING`, `USDC_MINT`, `RPC_URL`, and explorer URL helpers. All components import from here. Change `.env` and everything updates.
 
 ## Security Notes
 

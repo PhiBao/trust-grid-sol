@@ -13,6 +13,7 @@ const NAV = [
   { label: "Tasks", path: "/tasks" },
   { label: "Network", path: "/network" },
   { label: "Dashboard", path: "/dashboard" },
+  { label: "MCP", path: "/mcp" },
 ];
 
 export default function Layout({ children }: LayoutProps) {

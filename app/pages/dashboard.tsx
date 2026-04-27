@@ -6,9 +6,15 @@ import {
   fetchTasks, Task
 } from '../lib/agents';
 import { buildRegisterAgentTx, sendTxRobust, getUSDCBalance, getSOLBalance } from '../lib/transactions';
+import { getTxUrl } from '../lib/constants';
 import Layout from '../components/Layout';
 
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com";
+
+interface ToastState {
+  message: string;
+  signature?: string;
+}
 
 export default function DashboardPage() {
   const { publicKey, connected, wallet } = useWallet();
@@ -17,7 +23,7 @@ export default function DashboardPage() {
   const [agents, setAgents] = useState<OnChainAgent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'register'>('overview');
   const [usdcBalance, setUsdcBalance] = useState(0);
   const [solBalance, setSolBalance] = useState(0);
@@ -49,9 +55,9 @@ export default function DashboardPage() {
     }
   }, [publicKey, connection, refreshKey]);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+  const showToast = (message: string, signature?: string) => {
+    setToast({ message, signature });
+    setTimeout(() => setToast(null), 5000);
   };
 
   const myTasks = publicKey ? tasks.filter((t) => t.client === publicKey.toBase58()) : [];
@@ -73,7 +79,7 @@ export default function DashboardPage() {
       };
       const { tx, agentId } = await buildRegisterAgentTx(connection, publicKey, regUri.trim(), metadata);
       const sig = await sendTxRobust(tx, connection, wallet?.adapter);
-      showToast(`Agent #${agentId} registered! Tx: ${sig.slice(0, 16)}...`);
+      showToast(`Agent #${agentId} registered on-chain!`, sig);
       setRegName(""); setRegSkill(""); setRegCategory("security"); setRegFramework("rust");
       setRegPrice("1.0"); setRegEndpoint(""); setRegDesc(""); setRegUri("");
       setRefreshKey((k) => k + 1);
@@ -88,8 +94,22 @@ export default function DashboardPage() {
   return (
     <Layout>
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] bg-ink text-white text-sm px-5 py-2.5 rounded-pill shadow-product animate-bounce">
-          {toast}
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] bg-ink text-white text-sm px-5 py-3 rounded-pill shadow-product animate-bounce max-w-md">
+          <div className="flex items-center space-x-3">
+            <span>{toast.message}</span>
+            {toast.signature && (
+              <a
+                href={getTxUrl(toast.signature)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-action-blue hover:underline whitespace-nowrap"
+                onClick={(e) => e.stopPropagation()}
+              >
+                View Tx →
+              </a>
+            )}
+            <button onClick={() => setToast(null)} className="text-white/60 hover:text-white ml-1">✕</button>
+          </div>
         </div>
       )}
 
@@ -187,21 +207,31 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <label className="text-fine text-ink/40 block mb-1.5">Category</label>
-                    <select value={regCategory} onChange={(e) => setRegCategory(e.target.value)} className="w-full bg-parchment rounded-utility px-4 py-2.5 text-body-apple text-ink outline-none focus:ring-2 focus:ring-action-blue/30">
-                      {['security', 'trading', 'data', 'compliance', 'defi', 'general'].map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select value={regCategory} onChange={(e) => setRegCategory(e.target.value)} className="w-full bg-parchment rounded-utility px-4 py-2.5 text-body-apple text-ink outline-none focus:ring-2 focus:ring-action-blue/30 appearance-none cursor-pointer">
+                        {['security', 'trading', 'data', 'compliance', 'defi', 'general'].map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-ink/40">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-fine text-ink/40 block mb-1.5">Framework</label>
-                    <select value={regFramework} onChange={(e) => setRegFramework(e.target.value)} className="w-full bg-parchment rounded-utility px-4 py-2.5 text-body-apple text-ink outline-none focus:ring-2 focus:ring-action-blue/30">
-                      {['rust', 'python', 'typescript', 'solidity', 'go', 'other'].map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select value={regFramework} onChange={(e) => setRegFramework(e.target.value)} className="w-full bg-parchment rounded-utility px-4 py-2.5 text-body-apple text-ink outline-none focus:ring-2 focus:ring-action-blue/30 appearance-none cursor-pointer">
+                        {['rust', 'python', 'typescript', 'solidity', 'go', 'other'].map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-ink/40">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <label className="text-fine text-ink/40 block mb-1.5">Price (USDC)</label>

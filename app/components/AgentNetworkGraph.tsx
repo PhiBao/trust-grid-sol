@@ -22,6 +22,7 @@ interface NetworkEdge {
 interface AgentNetworkGraphProps {
   agents: { agentId: number; metadata: Record<string, string> }[];
   tasks?: { taskId: number; agentId: number; status: string }[];
+  onAgentClick?: (agentId: number) => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -33,7 +34,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   general: "#8e8e93",
 };
 
-export default function AgentNetworkGraph({ agents, tasks = [] }: AgentNetworkGraphProps) {
+export default function AgentNetworkGraph({ agents, tasks = [], onAgentClick }: AgentNetworkGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredNode, setHoveredNode] = useState<NetworkNode | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -41,6 +42,7 @@ export default function AgentNetworkGraph({ agents, tasks = [] }: AgentNetworkGr
   const nodesRef = useRef<NetworkNode[]>([]);
   const edgesRef = useRef<NetworkEdge[]>([]);
   const animationRef = useRef<number>(0);
+  const dragNodeRef = useRef<NetworkNode | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -130,6 +132,10 @@ export default function AgentNetworkGraph({ agents, tasks = [] }: AgentNetworkGr
           node.y += (height / 2 - node.y) * 0.05;
           node.vx *= 0.8;
           node.vy *= 0.8;
+          return;
+        }
+
+        if (dragNodeRef.current && dragNodeRef.current.id === node.id) {
           return;
         }
 
@@ -240,6 +246,14 @@ export default function AgentNetworkGraph({ agents, tasks = [] }: AgentNetworkGr
     };
   }, [agents, tasks]);
 
+  const getNodeAt = (x: number, y: number) => {
+    return nodesRef.current.find((n) => {
+      const dx = x - n.x;
+      const dy = y - n.y;
+      return Math.sqrt(dx * dx + dy * dy) < n.radius;
+    });
+  };
+
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -248,12 +262,42 @@ export default function AgentNetworkGraph({ agents, tasks = [] }: AgentNetworkGr
     const y = e.clientY - rect.top;
     setMousePos({ x: e.clientX, y: e.clientY });
 
-    const hovered = nodesRef.current.find((n) => {
-      const dx = x - n.x;
-      const dy = y - n.y;
-      return Math.sqrt(dx * dx + dy * dy) < n.radius;
-    });
+    if (dragNodeRef.current) {
+      dragNodeRef.current.x = x;
+      dragNodeRef.current.y = y;
+      return;
+    }
+
+    const hovered = getNodeAt(x, y);
     setHoveredNode(hovered || null);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const node = getNodeAt(x, y);
+    if (node && node.id !== 0) {
+      dragNodeRef.current = node;
+    }
+  };
+
+  const handleMouseUp = () => {
+    dragNodeRef.current = null;
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const node = getNodeAt(x, y);
+    if (node && node.id !== 0 && onAgentClick) {
+      onAgentClick(node.id);
+    }
   };
 
   return (
@@ -262,6 +306,10 @@ export default function AgentNetworkGraph({ agents, tasks = [] }: AgentNetworkGr
         ref={canvasRef}
         className="w-full h-[500px] md:h-[600px] rounded-card bg-parchment cursor-pointer"
         onMouseMove={handleMouseMove}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onClick={handleClick}
       />
       {hoveredNode && (
         <div
@@ -270,6 +318,9 @@ export default function AgentNetworkGraph({ agents, tasks = [] }: AgentNetworkGr
         >
           <p className="text-caption-strong text-ink">{hoveredNode.name}</p>
           <p className="text-fine text-ink/50 capitalize">{hoveredNode.category}</p>
+          {hoveredNode.id !== 0 && (
+            <p className="text-micro text-action-blue mt-1">Click to view agent →</p>
+          )}
         </div>
       )}
     </div>
