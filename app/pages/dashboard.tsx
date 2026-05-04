@@ -7,6 +7,7 @@ import {
 } from '../lib/agents';
 import { buildRegisterAgentTx, sendTxRobust, getUSDCBalance, getSOLBalance } from '../lib/transactions';
 import { getTxUrl } from '../lib/constants';
+import { getOrCreateDelegateKey, revokeDelegateKey, isAgentModeEnabled, setAgentMode } from '../lib/agent-mode';
 import Layout from '../components/Layout';
 
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com";
@@ -28,6 +29,33 @@ export default function DashboardPage() {
   const [usdcBalance, setUsdcBalance] = useState(0);
   const [solBalance, setSolBalance] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Agent Mode state
+  const [agentMode, setAgentMode] = useState(false);
+  const [delegateKey, setDelegateKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAgentMode(isAgentModeEnabled());
+    const dk = getOrCreateDelegateKey();
+    setDelegateKey(dk ? dk.publicKey.toBase58() : null);
+  }, []);
+
+  const toggleAgentMode = () => {
+    const next = !agentMode;
+    setAgentMode(next);
+    setAgentMode(next);
+    if (next) {
+      const dk = getOrCreateDelegateKey();
+      setDelegateKey(dk ? dk.publicKey.toBase58() : null);
+    }
+  };
+
+  const handleRevokeDelegate = () => {
+    revokeDelegateKey();
+    setDelegateKey(null);
+    setAgentMode(false);
+    setAgentMode(false);
+  };
 
   // Register form state
   const [regName, setRegName] = useState("");
@@ -183,6 +211,40 @@ export default function DashboardPage() {
                       </div>
                     ))}
                   </div>
+                )}
+              </div>
+
+              {/* Agent Mode */}
+              <div className="bg-white rounded-card border border-hairline p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-section text-ink">Agent Mode</h3>
+                    <p className="text-caption-apple text-ink/50 mt-1">Let your AI agent hire other agents autonomously via MCP.</p>
+                  </div>
+                  <button
+                    onClick={toggleAgentMode}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${agentMode ? 'bg-action-blue' : 'bg-ink/20'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${agentMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+                {agentMode ? (
+                  <div className="space-y-3">
+                    <div className="bg-green-50 rounded-utility p-3 flex items-center space-x-2">
+                      <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                      <span className="text-caption-apple text-green-700">Agent Mode is active</span>
+                    </div>
+                    {delegateKey && (
+                      <div className="bg-parchment rounded-utility p-3">
+                        <span className="text-fine text-ink/40 block mb-1">Delegated Key</span>
+                        <p className="text-caption-apple text-ink font-mono break-all">{delegateKey}</p>
+                      </div>
+                    )}
+                    <p className="text-fine text-ink/40">Your AI agent can now sign transactions autonomously via the MCP server. All actions are still logged on-chain.</p>
+                    <button onClick={handleRevokeDelegate} className="apple-pill-ghost text-sm border-red-300 text-red-500 hover:bg-red-50">Revoke Delegate Key</button>
+                  </div>
+                ) : (
+                  <p className="text-body-apple text-ink/50">Enable Agent Mode to let your AI agent hire other agents through the MCP server without manual wallet prompts.</p>
                 )}
               </div>
             </div>

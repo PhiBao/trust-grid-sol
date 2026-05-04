@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { fetchTasks, Task, fetchAgents, OnChainAgent, getAgentName } from '../lib/agents';
+import { buildAcceptTaskTx, buildDisputeTaskTx, sendTxRobust } from '../lib/transactions';
 import { getAccountUrl, getTaskPda } from '../lib/constants';
 import Layout from '../components/Layout';
 import { SkeletonTaskRow } from '../components/Skeleton';
@@ -9,11 +11,13 @@ type SortOption = 'newest' | 'oldest' | 'amount-high' | 'amount-low';
 
 export default function TasksPage() {
   const router = useRouter();
+  const { publicKey, connected, wallet } = useWallet();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<OnChainAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     Promise.all([fetchTasks(), fetchAgents()]).then(([t, a]) => {
@@ -21,9 +25,9 @@ export default function TasksPage() {
       setAgents(a);
       setLoading(false);
     });
-  }, []);
+  }, [refreshKey]);
 
-  const statuses = ["all", "open", "claimed", "completed", "cancelled", "expired"];
+  const statuses = ["all", "open", "claimed", "submitted", "completed", "cancelled", "expired", "disputed"];
 
   const getAgent = (agentId: number) => agents.find((a) => a.agentId === agentId);
 
@@ -46,6 +50,51 @@ export default function TasksPage() {
     }
     return result;
   }, [tasks, statusFilter, sortBy]);
+
+  const handleAccept = async (task: Task) => {
+    if (!publicKey || !wallet?.adapter) return;
+    try {
+      const tx = await buildAcceptTaskTx(
+        new (await import('@solana/web3.js')).Connection(process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com", "confirmed"),
+        publicKey,
+        task.taskId,
+        task.agentId,
+        5,
+        "excellent"
+      );
+      await sendTxRobust(tx, new (await import('@solana/web3.js')).Connection(process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com", "confirmed"), wallet.adapter);
+      setRefreshKey((k) => k + 1);
+    } catch (e: any) {
+      alert(e.message?.slice(0, 80) || "Accept failed");
+    }
+  };
+
+  const handleDispute = async (task: Task) => {
+    if (!publicKey || !wallet?.adapter) return;
+    try {
+      const tx = await buildDisputeTaskTx(
+        new (await import('@solana/web3.js')).Connection(process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com", "confirmed"),
+        publicKey,
+        task.taskId,
+        "Work does not meet requirements"
+      );
+      await sendTxRobust(tx, new (await import('@solana/web3.js')).Connection(process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com", "confirmed"), wallet.adapter);
+      setRefreshKey((k) => k + 1);
+    } catch (e: any) {
+      alert(e.message?.slice(0, 80) || "Dispute failed");
+    }
+  };
+
+  const isClient = (task: Task) => publicKey ? task.client === publicKey.toBase58() : false;
+
+  const getReviewTimeLeft = (submittedAt: number) => {
+    const end = submittedAt + 24 * 60 * 60;
+    const remaining = end - Math.floor(Date.now() / 1000);
+    if (remaining <= 0) return "Expired";
+    const hours = Math.floor(remaining / 3600);
+    const mins = Math.floor((remaining % 3600) / 60);
+    return `${hours}h ${mins}m left`;
+  };
 
   return (
     <Layout>
@@ -110,6 +159,7 @@ export default function TasksPage() {
                 const agent = getAgent(t.agentId);
                 const agentName = agent ? getAgentName(agent) : `Agent #${t.agentId}`;
                 const taskPda = getTaskPda(t.taskId).toBase58();
+                const clientView = isClient(t);
                 return (
                   <a key={t.taskId} href={getAccountUrl(taskPda)} target="_blank" rel="noopener noreferrer" className="block bg-white rounded-card border border-hairline p-5 hover:border-action-blue/30 transition-colors">
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -117,13 +167,37 @@ export default function TasksPage() {
                         <div className="flex items-center space-x-3 mb-1">
                           <h3 className="text-body-strong text-ink">Task #{t.taskId}</h3>
                           <StatusBadge status={t.status} />
+                          {t.status === 'submitted' && (
+                            <span className="text-micro text-orange-600 bg-orange-50 px-2 py-0.5 rounded-utility">
+                              {getReviewTimeLeft(t.submittedAt)}
+                            </span>
+                          )}
                         </div>
                         <p className="text-caption-apple text-ink/50">
                           {(t.amount / 1_000_000).toFixed(2)} USDC • Agent: {agentName}
                         </p>
                         <p className="text-fine text-ink/40 mt-1">Deadline: {new Date(t.deadline * 1000).toLocaleDateString()}</p>
+                        {t.disputeReason && (
+                          <p className="text-fine text-red-500 mt-1">Dispute: {t.disputeReason}</p>
+                        )}
                       </div>
                       <div className="flex items-center space-x-3">
+                        {t.status === 'submitted' && clientView && (
+                          <>
+                            <button
+                              onClick={(e) => { e.preventDefault(); handleAccept(t); }}
+                              className="apple-pill text-sm"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={(e) => { e.preventDefault(); handleDispute(t); }}
+                              className="apple-pill-ghost text-sm border-red-300 text-red-500 hover:bg-red-50"
+                            >
+                              Dispute
+                            </button>
+                          </>
+                        )}
                         <button
                           onClick={(e) => { e.preventDefault(); router.push(`/agent?id=${t.agentId}`); }}
                           className="apple-pill-ghost text-sm"
@@ -148,9 +222,11 @@ function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     open: 'bg-blue-50 text-blue-600',
     claimed: 'bg-orange-50 text-orange-600',
+    submitted: 'bg-purple-50 text-purple-600',
     completed: 'bg-green-50 text-green-600',
     cancelled: 'bg-gray-50 text-gray-600',
     expired: 'bg-gray-50 text-gray-600',
+    disputed: 'bg-red-50 text-red-600',
   };
   return (
     <span className={`text-micro px-2 py-0.5 rounded-utility capitalize font-medium ${styles[status] || styles.cancelled}`}>

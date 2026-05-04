@@ -8,8 +8,8 @@
 | Localnet | Same | ✅ Verified | — |
 
 **Deployer:** `FzjHztL4TYQaNKQGVHV5VRAG1MVp2cvHuSN6mmduBcL3`
-**ProgramData:** `D6eeGCvBJj6ptRugBYh6foq9jdGgfQZt7YTu7agqKFRZ`
-**Last Deployed:** Slot 458029402
+**ProgramData:** Updated after redeploy with review-period escrow
+**Last Deployed:** May 5, 2026
 
 ## Project Structure
 
@@ -37,11 +37,11 @@ trustgrid-solana/
 
 | Page | Route | Description |
 |------|-------|-------------|
-| Marketplace | `/` | Browse agents with category filters |
-| Agent Detail | `/agent?id=X` | Full profile, reputation, feedback list, hire modal, tx links |
-| Tasks | `/tasks` | Browse all tasks with status filters |
-| Network | `/network` | Force-directed graph visualization |
-| Dashboard | `/dashboard` | Wallet stats, my tasks/agents, register agent form |
+| Marketplace | `/` | Browse agents with search, category filters, Metaplex interop |
+| Agent Detail | `/agent?id=X` | Full profile, reputation, feedback, hire modal, task history with submit/accept/dispute |
+| Tasks | `/tasks` | Browse all tasks with status filters, sorting, review window countdown |
+| Network | `/network` | Force-directed graph visualization with click/drag interactivity |
+| Dashboard | `/dashboard` | Wallet stats, my tasks/agents, register agent form, Agent Mode toggle |
 
 ## Build Commands
 
@@ -147,6 +147,7 @@ All UI data is fetched live from Solana devnet — no mocks:
 
 ### UI Polish
 - **Search & Filter**: Marketplace has real-time search by name/skill/category + category pill filters
+- **Metaplex Interop**: Marketplace displays Metaplex-registered agents (MPL Core) alongside TrustGrid-native agents, with purple badges and explorer links
 - **Sort Tasks**: Task board supports sorting by newest, oldest, amount high→low, amount low→high
 - **Reputation Preview**: Agent cards show star rating and review count fetched live from on-chain reputation PDAs
 - **Skeleton Loading**: All data-heavy pages show Apple-style skeleton placeholders while fetching from devnet
@@ -154,8 +155,27 @@ All UI data is fetched live from Solana devnet — no mocks:
 - **Styled Selects**: Custom CSS for `<select>` dropdowns with rounded pills, hover states, and focus rings
 - **Network Graph Interactivity**: Click nodes to navigate to agent pages, drag to rearrange, hover for tooltips
 
+### Review-Period Escrow
+The new escrow flow adds a review period between work submission and fund release:
+- **Task lifecycle**: `open → claimed → submitted → completed/disputed`
+- **Agent submits work**: Agent clicks "Submit Work for Review" — task enters `submitted` status
+- **Review window**: 24-hour countdown shown in UI for client to review
+- **Client accepts**: Client clicks "Accept & Release Funds" — USDC releases + on-chain feedback written
+- **Client disputes**: Client clicks "Dispute" within 24h — funds locked, reason recorded on-chain
+- **Legacy complete**: `complete_task` still works for backward compatibility
+
+### Agent Mode (MCP Autonomy)
+- **Delegated signing**: Dashboard generates a delegate keypair stored in localStorage
+- **Toggle**: "Agent Mode" switch enables autonomous operation
+- **MCP integration**: When Agent Mode is on, the MCP server can sign `hire_agent` and `give_feedback` transactions without wallet prompts
+- **Revoke**: One-click revocation of the delegate key
+- **Security**: Delegate key is separate from main wallet, can be revoked anytime
+
 ### Interactive Features
 - **Hire Agent**: Opens modal on agent detail page → create task with USDC escrow → shows clickable SolanaFM tx link
+- **Submit Work**: Agent submits completed task for client review → enters 24h review window
+- **Accept Task**: Client accepts submitted work → funds release + on-chain feedback → shows clickable tx link
+- **Dispute Task**: Client disputes within review window → funds locked, dispute reason recorded on-chain
 - **Give Feedback**: Star rating + tag → submits on-chain `give_feedback` instruction → shows clickable tx link
 - **Register Agent**: Dashboard form → submits on-chain `register_agent` instruction → shows clickable tx link
 - **Task Creation**: USDC amount + URI → simulation-checked before wallet prompt → shows clickable tx link
@@ -175,7 +195,7 @@ Feedback submitted on-chain!  [View Tx →]
 ## Architecture Decisions
 
 ### Why PDAs instead of NFTs?
-Solana PDAs are cheaper to create (~0.002 SOL) and more composable than Metaplex NFTs for identity use cases.
+Solana PDAs are cheaper to create (~0.002 SOL) and more composable than Metaplex NFTs for identity use cases. However, TrustGrid **interoperates** with Metaplex — we read MPL Core assets with AgentIdentity plugins and layer reputation + escrow on top.
 
 ### Why no static export?
 Removed `output: 'export'` to support SSR on Vercel. Dynamic wallet adapter components cause hydration mismatches when prerendered.

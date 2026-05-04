@@ -40,6 +40,8 @@ interface RawFeedback {
   index: number;
 }
 
+export type TaskStatus = 'open' | 'claimed' | 'submitted' | 'completed' | 'cancelled' | 'expired' | 'disputed';
+
 export interface Task {
   taskId: number;
   client: string;
@@ -48,9 +50,11 @@ export interface Task {
   amount: number;
   deadline: number;
   taskUri: string;
-  status: 'open' | 'claimed' | 'completed' | 'cancelled' | 'expired';
+  status: TaskStatus;
   claimedBy: string | null;
   escrowVault: string;
+  submittedAt: number;
+  disputeReason: string | null;
 }
 
 function readString(data: Buffer, offset: number): { value: string; nextOffset: number } {
@@ -129,14 +133,28 @@ function decodeTask(data: Buffer): Task | null {
     offset = uriResult.nextOffset;
     const statusCode = data[offset];
     offset += 1;
-    const statusMap: Record<number, Task['status']> = { 0: 'open', 1: 'claimed', 2: 'completed', 3: 'cancelled', 4: 'expired' };
+    const statusMap: Record<number, TaskStatus> = { 
+      0: 'open', 1: 'claimed', 2: 'submitted', 3: 'completed', 
+      4: 'cancelled', 5: 'expired', 6: 'disputed' 
+    };
     const status = statusMap[statusCode] || 'open';
     const claimedByDisc = data[offset];
     offset += 1;
     const claimedBy = claimedByDisc === 1 ? new PublicKey(data.slice(offset, offset + 32)).toBase58() : null;
     offset += claimedByDisc === 1 ? 32 : 0;
     const escrowVault = new PublicKey(data.slice(offset, offset + 32)).toBase58();
-    return { taskId, client, agentId, tokenMint, amount, deadline, taskUri, status, claimedBy, escrowVault };
+    offset += 32;
+    const submittedAt = Number(data.readBigInt64LE(offset));
+    offset += 8;
+    const hasDispute = data[offset] === 1;
+    offset += 1;
+    let disputeReason: string | null = null;
+    if (hasDispute) {
+      const reasonResult = readString(data, offset);
+      disputeReason = reasonResult.value;
+      offset = reasonResult.nextOffset;
+    }
+    return { taskId, client, agentId, tokenMint, amount, deadline, taskUri, status, claimedBy, escrowVault, submittedAt, disputeReason };
   } catch (e) {
     console.error("Failed to decode task:", e);
     return null;

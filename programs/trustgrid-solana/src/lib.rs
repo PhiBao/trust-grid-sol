@@ -5,6 +5,9 @@ use anchor_spl::token::{self, Token, TokenAccount, Mint, Transfer};
 const PROTOCOL_FEE_BPS: u64 = 100;
 const BPS_DENOMINATOR: u64 = 10_000;
 
+// Review window: 24 hours in seconds
+const REVIEW_WINDOW_SECONDS: i64 = 24 * 60 * 60;
+
 declare_id!("2Ps1h8YwCTxLo6bHiCaN3xT2r8mdj5qP4hxUPrVoCszE");
 
 #[program]
@@ -173,9 +176,6 @@ pub mod trustgrid_solana {
         let feedback = &ctx.accounts.feedback;
         let agent_id = feedback.agent_id;
         
-        // Note: In production, you'd want to adjust the average score
-        // This is a simplified version
-        
         msg!("Feedback revoked: agent_id={}, index={}", agent_id, feedback.index);
         Ok(())
     }
@@ -236,6 +236,8 @@ pub mod trustgrid_solana {
         task.status = TaskStatus::Open;
         task.claimed_by = None;
         task.escrow_vault = ctx.accounts.escrow_vault.key();
+        task.submitted_at = 0;
+        task.dispute_reason = None;
 
         msg!(
             "Task created: id={}, agent_id={}, amount={}",
@@ -275,8 +277,38 @@ pub mod trustgrid_solana {
         Ok(())
     }
 
-    pub fn complete_task(
-        ctx: Context<CompleteTask>,
+    // Agent submits completed work for client review
+    pub fn submit_task(ctx: Context<SubmitTask>) -> Result<()> {
+        let task = &mut ctx.accounts.task;
+        let agent_identity = &ctx.accounts.agent_identity;
+        
+        require!(task.status == TaskStatus::Claimed, ErrorCode::TaskNotClaimed);
+        
+        // Verify the submitter is the claimer
+        let claimer = task.claimed_by.ok_or(ErrorCode::UnauthorizedSubmission)?;
+        require!(
+            claimer == ctx.accounts.submitter.key(),
+            ErrorCode::UnauthorizedSubmission
+        );
+        require!(
+            agent_identity.agent_id == task.agent_id,
+            ErrorCode::WrongAgentClaim
+        );
+
+        task.status = TaskStatus::Submitted;
+        task.submitted_at = Clock::get()?.unix_timestamp;
+
+        msg!(
+            "Task submitted for review: id={}, agent_id={}",
+            task.task_id,
+            agent_identity.agent_id
+        );
+        Ok(())
+    }
+
+    // Client accepts submitted work — releases funds + writes feedback
+    pub fn accept_task(
+        ctx: Context<AcceptTask>,
         feedback_value: u8,
         feedback_tag: String,
     ) -> Result<()> {
@@ -287,7 +319,7 @@ pub mod trustgrid_solana {
         require!(feedback_tag.len() <= 50, ErrorCode::TagTooLong);
         
         let task = &mut ctx.accounts.task;
-        require!(task.status == TaskStatus::Claimed, ErrorCode::TaskNotClaimed);
+        require!(task.status == TaskStatus::Submitted, ErrorCode::TaskNotSubmitted);
         require!(
             task.client == ctx.accounts.client.key(),
             ErrorCode::UnauthorizedCompletion
@@ -351,7 +383,117 @@ pub mod trustgrid_solana {
         feedback.index = reputation.feedback_count - 1;
 
         msg!(
-            "Task completed: id={}, agent_payment={}, fee={}",
+            "Task accepted: id={}, agent_payment={}, fee={}",
+            task.task_id,
+            agent_payment,
+            protocol_fee
+        );
+        Ok(())
+    }
+
+    // Client disputes submitted work — locks funds for arbitration
+    pub fn dispute_task(
+        ctx: Context<DisputeTask>,
+        reason: String,
+    ) -> Result<()> {
+        require!(reason.len() <= 200, ErrorCode::UriTooLong);
+        
+        let task = &mut ctx.accounts.task;
+        require!(task.status == TaskStatus::Submitted, ErrorCode::TaskNotSubmitted);
+        require!(
+            task.client == ctx.accounts.client.key(),
+            ErrorCode::UnauthorizedCompletion
+        );
+        require!(
+            Clock::get()?.unix_timestamp <= task.submitted_at + REVIEW_WINDOW_SECONDS,
+            ErrorCode::ReviewWindowExpired
+        );
+
+        task.status = TaskStatus::Disputed;
+        task.dispute_reason = Some(reason);
+
+        msg!(
+            "Task disputed: id={}, reason={}",
+            task.task_id,
+            task.dispute_reason.as_ref().unwrap()
+        );
+        Ok(())
+    }
+
+    // Legacy: complete_task now redirects to submit_task behavior for backward compat
+    // In production, remove this and use submit_task + accept_task flow
+    pub fn complete_task(
+        ctx: Context<CompleteTask>,
+        feedback_value: u8,
+        feedback_tag: String,
+    ) -> Result<()> {
+        require!(
+            feedback_value >= 1 && feedback_value <= 5,
+            ErrorCode::InvalidFeedbackValue
+        );
+        require!(feedback_tag.len() <= 50, ErrorCode::TagTooLong);
+        
+        let task = &mut ctx.accounts.task;
+        require!(task.status == TaskStatus::Claimed, ErrorCode::TaskNotClaimed);
+        require!(
+            task.client == ctx.accounts.client.key(),
+            ErrorCode::UnauthorizedCompletion
+        );
+
+        let protocol_fee = task.amount * PROTOCOL_FEE_BPS / BPS_DENOMINATOR;
+        let agent_payment = task.amount - protocol_fee;
+
+        let protocol_state = &ctx.accounts.protocol_state;
+        let fee_wallet = protocol_state.fee_wallet;
+        
+        let escrow_bump = ctx.bumps.escrow_vault;
+        let task_id_bytes = task.task_id.to_le_bytes();
+        let seeds = &[b"escrow_vault", task_id_bytes.as_ref(), &[escrow_bump]];
+        let signer = &[&seeds[..]];
+
+        if protocol_fee > 0 {
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.escrow_vault.to_account_info(),
+                to: ctx.accounts.fee_token_account.to_account_info(),
+                authority: ctx.accounts.escrow_vault.to_account_info(),
+            };
+            let cpi_program = ctx.accounts.token_program.to_account_info();
+            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+            token::transfer(cpi_ctx, protocol_fee)?;
+        }
+
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.escrow_vault.to_account_info(),
+            to: ctx.accounts.agent_token_account.to_account_info(),
+            authority: ctx.accounts.escrow_vault.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        token::transfer(cpi_ctx, agent_payment)?;
+
+        let protocol_state = &mut ctx.accounts.protocol_state;
+        protocol_state.total_fees_collected += protocol_fee;
+
+        task.status = TaskStatus::Completed;
+
+        let reputation = &mut ctx.accounts.agent_reputation;
+        reputation.agent_id = task.agent_id;
+        reputation.total_feedback += 1;
+        let new_avg = ((reputation.average_score as u128 * (reputation.feedback_count as u128) + (feedback_value as u128 * 100)) / (reputation.feedback_count as u128 + 1)) as u64;
+        reputation.average_score = new_avg;
+        reputation.feedback_count += 1;
+
+        let feedback = &mut ctx.accounts.feedback;
+        feedback.agent_id = task.agent_id;
+        feedback.client = ctx.accounts.client.key();
+        feedback.value = feedback_value;
+        feedback.tag = feedback_tag;
+        feedback.response_uri = None;
+        feedback.created_at = Clock::get()?.unix_timestamp;
+        feedback.index = reputation.feedback_count - 1;
+
+        msg!(
+            "Task completed (legacy): id={}, agent_payment={}, fee={}",
             task.task_id,
             agent_payment,
             protocol_fee
@@ -648,6 +790,105 @@ pub struct ClaimTask<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SubmitTask<'info> {
+    #[account(mut)]
+    pub submitter: Signer<'info>,
+    
+    #[account(
+        mut,
+        constraint = task.status == TaskStatus::Claimed
+    )]
+    pub task: Account<'info, Task>,
+    
+    #[account(
+        constraint = agent_identity.agent_id == task.agent_id
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptTask<'info> {
+    #[account(mut)]
+    pub client: Signer<'info>,
+    
+    #[account(
+        mut,
+        constraint = task.client == client.key()
+    )]
+    pub task: Account<'info, Task>,
+    
+    #[account(
+        mut,
+        seeds = [b"protocol_state"],
+        bump
+    )]
+    pub protocol_state: Account<'info, ProtocolState>,
+    
+    #[account(
+        mut,
+        constraint = agent_identity.agent_id == task.agent_id
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+    
+    #[account(
+        init_if_needed,
+        payer = client,
+        space = 8 + AgentReputation::SIZE,
+        seeds = [b"reputation", task.agent_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub agent_reputation: Account<'info, AgentReputation>,
+    
+    #[account(
+        init,
+        payer = client,
+        space = 8 + Feedback::MAX_SIZE,
+        seeds = [
+            b"feedback",
+            task.agent_id.to_le_bytes().as_ref(),
+            client.key().as_ref(),
+            agent_reputation.feedback_count.to_le_bytes().as_ref()
+        ],
+        bump
+    )]
+    pub feedback: Account<'info, Feedback>,
+    
+    #[account(
+        mut,
+        seeds = [b"escrow_vault", task.task_id.to_le_bytes().as_ref()],
+        bump,
+    )]
+    pub escrow_vault: Account<'info, TokenAccount>,
+    
+    #[account(
+        mut,
+        constraint = fee_token_account.owner == protocol_state.fee_wallet
+    )]
+    pub fee_token_account: Account<'info, TokenAccount>,
+    
+    #[account(
+        mut,
+        constraint = agent_token_account.owner == agent_identity.wallet || agent_token_account.owner == agent_identity.authority
+    )]
+    pub agent_token_account: Account<'info, TokenAccount>,
+    
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct DisputeTask<'info> {
+    #[account(mut)]
+    pub client: Signer<'info>,
+    
+    #[account(
+        mut,
+        constraint = task.client == client.key()
+    )]
+    pub task: Account<'info, Task>,
+}
+
+#[derive(Accounts)]
 pub struct CompleteTask<'info> {
     #[account(mut)]
     pub client: Signer<'info>,
@@ -860,19 +1101,23 @@ pub struct Task {
     pub status: TaskStatus,
     pub claimed_by: Option<Pubkey>,
     pub escrow_vault: Pubkey,
+    pub submitted_at: i64,
+    pub dispute_reason: Option<String>,
 }
 
 impl Task {
-    pub const MAX_SIZE: usize = 8 + 32 + 8 + 32 + 8 + 8 + (4 + 200) + 1 + (1 + 32) + 32;
+    pub const MAX_SIZE: usize = 8 + 32 + 8 + 32 + 8 + 8 + (4 + 200) + 1 + (1 + 32) + 32 + 8 + (1 + 4 + 200);
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
     Open,
     Claimed,
+    Submitted,
     Completed,
     Cancelled,
     Expired,
+    Disputed,
 }
 
 // ==================== ERROR CODES ====================
@@ -903,10 +1148,14 @@ pub enum ErrorCode {
     TaskNotOpen,
     #[msg("Task not claimed")]
     TaskNotClaimed,
+    #[msg("Task not submitted")]
+    TaskNotSubmitted,
     #[msg("Wrong agent claim")]
     WrongAgentClaim,
     #[msg("Unauthorized claim")]
     UnauthorizedClaim,
+    #[msg("Unauthorized submission")]
+    UnauthorizedSubmission,
     #[msg("Unauthorized completion")]
     UnauthorizedCompletion,
     #[msg("Unauthorized cancellation")]
@@ -915,4 +1164,6 @@ pub enum ErrorCode {
     UnauthorizedReclaim,
     #[msg("Task not expired")]
     TaskNotExpired,
+    #[msg("Review window expired")]
+    ReviewWindowExpired,
 }

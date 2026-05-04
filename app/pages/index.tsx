@@ -4,6 +4,7 @@ import {
   fetchAgents, OnChainAgent, getAgentName, getAgentCategory, getAgentPrice, getAgentSkill,
   fetchReputation, AgentReputation, fetchTasks
 } from '../lib/agents';
+import { fetchMetaplexAgents, isMetaplexAgent, getMetaplexExplorerUrl } from '../lib/metaplex';
 import Layout from '../components/Layout';
 import { SkeletonCard, SkeletonStat } from '../components/Skeleton';
 
@@ -22,24 +23,26 @@ export default function Marketplace() {
   const [taskCount, setTaskCount] = useState(0);
   const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [showMetaplex, setShowMetaplex] = useState(true);
 
   useEffect(() => {
-    fetchAgents().then((fetched) => {
-      setAgents(fetched);
+    Promise.all([fetchAgents(), fetchMetaplexAgents(), fetchTasks()]).then(([fetched, mplAgents, tasks]) => {
+      const merged = showMetaplex ? [...fetched, ...mplAgents] : fetched;
+      setAgents(merged);
       setLoading(false);
-      Promise.all(fetched.map((a) => fetchReputation(a.agentId))).then((reps) => {
+      Promise.all(merged.map((a) => fetchReputation(a.agentId))).then((reps) => {
         const map: Record<number, AgentReputation | null> = {};
         let count = 0;
-        fetched.forEach((a, i) => {
+        merged.forEach((a, i) => {
           map[a.agentId] = reps[i];
           count += reps[i]?.feedbackCount || 0;
         });
         setReputations(map);
         setTotalFeedback(count);
       });
+      setTaskCount(tasks.length);
     });
-    fetchTasks().then((t) => setTaskCount(t.length));
-  }, []);
+  }, [showMetaplex]);
 
   const categories = useMemo(() => {
     const cats = Array.from(new Set(agents.map((a) => getAgentCategory(a).toLowerCase())));
@@ -222,23 +225,29 @@ function AgentCard({ agent, reputation }: { agent: OnChainAgent; reputation?: Ag
   const skill = getAgentSkill(agent);
   const avg = reputation ? Math.round(reputation.averageScore / 100) : 0;
   const count = reputation?.feedbackCount || 0;
+  const isMpl = isMetaplexAgent(agent);
 
   return (
     <div
       className="apple-card p-5 hover:shadow-product transition-all duration-300 cursor-pointer group"
-      onClick={() => router.push(`/agent?id=${agent.agentId}`)}
+      onClick={() => isMpl ? window.open(getMetaplexExplorerUrl(agent.pda), '_blank') : router.push(`/agent?id=${agent.agentId}`)}
     >
       <div className="flex items-start justify-between mb-4">
-        <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-utility flex items-center justify-center">
+        <div className={`w-10 h-10 rounded-utility flex items-center justify-center ${isMpl ? 'bg-gradient-to-br from-purple-500 to-pink-600' : 'bg-gradient-to-br from-cyan-500 to-blue-600'}`}>
           <span className="text-white font-bold">{name[0]}</span>
         </div>
-        <span className="text-micro text-action-blue bg-action-blue/5 px-2 py-1 rounded-utility capitalize">{cat}</span>
+        <div className="flex items-center space-x-1.5">
+          {isMpl && (
+            <span className="text-micro text-purple-600 bg-purple-50 px-2 py-1 rounded-utility">Metaplex</span>
+          )}
+          <span className="text-micro text-action-blue bg-action-blue/5 px-2 py-1 rounded-utility capitalize">{cat}</span>
+        </div>
       </div>
       <h3 className="text-body-strong text-ink mb-1 group-hover:text-action-blue transition-colors">{name}</h3>
       <p className="text-caption-apple text-ink/50 mb-4 line-clamp-2">{skill}</p>
       <div className="flex items-center justify-between">
-        <span className="text-fine text-ink/40">ID #{agent.agentId}</span>
-        <span className="text-caption-strong text-action-blue">{price}</span>
+        <span className="text-fine text-ink/40">{isMpl ? 'MPL Core' : `ID #${agent.agentId}`}</span>
+        <span className="text-caption-strong text-action-blue">{isMpl ? 'View on Explorer' : price}</span>
       </div>
       <div className="mt-4 pt-4 border-t border-hairline flex items-center justify-between">
         <span className="text-fine text-ink/40">{agent.metadata["framework"] || ""}</span>

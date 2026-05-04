@@ -6,7 +6,7 @@ import {
   fetchAgents, OnChainAgent, getAgentName, getAgentCategory, getAgentPrice, getAgentSkill,
   fetchReputation, AgentReputation, fetchTasks, Task, fetchFeedbacksForAgent, Feedback
 } from '../lib/agents';
-import { buildGiveFeedbackTx, buildCreateTaskTx, sendTxRobust, getUSDCBalance, getSOLBalance } from '../lib/transactions';
+import { buildGiveFeedbackTx, buildCreateTaskTx, buildSubmitTaskTx, buildAcceptTaskTx, buildDisputeTaskTx, sendTxRobust, getUSDCBalance, getSOLBalance } from '../lib/transactions';
 import { getTxUrl, getAccountUrl, getTaskPda } from '../lib/constants';
 import Layout from '../components/Layout';
 
@@ -125,6 +125,57 @@ export default function AgentDetailPage() {
   const agentTasks = agent ? tasks.filter((t) => t.agentId === agent.agentId) : [];
   const name = agent ? getAgentName(agent) : "";
   const cat = agent ? getAgentCategory(agent) : "";
+
+  const isAgentAuthority = agent && publicKey ? agent.authority === publicKey.toBase58() : false;
+  const isAgentWallet = agent && publicKey ? agent.wallet === publicKey.toBase58() : false;
+  const canActAsAgent = isAgentAuthority || isAgentWallet;
+
+  const getReviewTimeLeft = (submittedAt: number) => {
+    const end = submittedAt + 24 * 60 * 60;
+    const remaining = end - Math.floor(Date.now() / 1000);
+    if (remaining <= 0) return "Expired";
+    const hours = Math.floor(remaining / 3600);
+    const mins = Math.floor((remaining % 3600) / 60);
+    return `${hours}h ${mins}m left`;
+  };
+
+  const handleSubmitTask = async (task: Task) => {
+    if (!publicKey || !wallet?.adapter || !agent) return;
+    try {
+      const tx = await buildSubmitTaskTx(connection, publicKey, task.taskId, agent.agentId, new PublicKey(agent.authority));
+      const sig = await sendTxRobust(tx, connection, wallet.adapter);
+      showToast("Task submitted for review!", sig);
+      setTasks(await fetchTasks());
+    } catch (e: any) {
+      showToast(e.message?.slice(0, 80) || "Submit failed");
+    }
+  };
+
+  const handleAcceptTask = async (task: Task) => {
+    if (!publicKey || !wallet?.adapter) return;
+    try {
+      const tx = await buildAcceptTaskTx(connection, publicKey, task.taskId, task.agentId, 5, "excellent");
+      const sig = await sendTxRobust(tx, connection, wallet.adapter);
+      showToast("Task accepted and funds released!", sig);
+      setTasks(await fetchTasks());
+      const [rep, fbList] = await Promise.all([fetchReputation(task.agentId), fetchFeedbacksForAgent(task.agentId)]);
+      setReputation(rep); setFeedbacks(fbList);
+    } catch (e: any) {
+      showToast(e.message?.slice(0, 80) || "Accept failed");
+    }
+  };
+
+  const handleDisputeTask = async (task: Task) => {
+    if (!publicKey || !wallet?.adapter) return;
+    try {
+      const tx = await buildDisputeTaskTx(connection, publicKey, task.taskId, "Work does not meet requirements");
+      const sig = await sendTxRobust(tx, connection, wallet.adapter);
+      showToast("Task disputed!", sig);
+      setTasks(await fetchTasks());
+    } catch (e: any) {
+      showToast(e.message?.slice(0, 80) || "Dispute failed");
+    }
+  };
 
   return (
     <Layout>
@@ -257,18 +308,41 @@ export default function AgentDetailPage() {
                     <p className="text-body-apple text-ink/50">No tasks yet for this agent.</p>
                   ) : (
                     <div className="space-y-3">
-                      {agentTasks.map((t) => (
-                        <a key={t.taskId} href={getAccountUrl(getTaskPda(t.taskId).toBase58())} target="_blank" rel="noopener noreferrer" className="block bg-parchment rounded-utility p-4 flex items-center justify-between hover:border-action-blue/30 border border-transparent transition-colors">
-                          <div>
-                            <p className="text-caption-strong text-ink">Task #{t.taskId}</p>
-                            <p className="text-fine text-ink/50">{(t.amount / 1_000_000).toFixed(2)} USDC • Deadline: {new Date(t.deadline * 1000).toLocaleDateString()}</p>
+                      {agentTasks.map((t) => {
+                        const isClient = publicKey ? t.client === publicKey.toBase58() : false;
+                        return (
+                          <div key={t.taskId} className="bg-parchment rounded-utility p-4 hover:border-action-blue/30 border border-transparent transition-colors">
+                            <div className="flex items-center justify-between mb-2">
+                              <div>
+                                <p className="text-caption-strong text-ink">Task #{t.taskId}</p>
+                                <p className="text-fine text-ink/50">{(t.amount / 1_000_000).toFixed(2)} USDC • Deadline: {new Date(t.deadline * 1000).toLocaleDateString()}</p>
+                              </div>
+                              <div className="flex items-center space-x-3">
+                                <StatusBadge status={t.status} />
+                                {t.status === 'submitted' && (
+                                  <span className="text-micro text-orange-600 bg-orange-50 px-2 py-0.5 rounded-utility">
+                                    {getReviewTimeLeft(t.submittedAt)}
+                                  </span>
+                                )}
+                                <a href={getAccountUrl(getTaskPda(t.taskId).toBase58())} target="_blank" rel="noopener noreferrer" className="text-fine text-action-blue">View →</a>
+                              </div>
+                            </div>
+                            {/* Action buttons */}
+                            {t.status === 'claimed' && canActAsAgent && (
+                              <button onClick={() => handleSubmitTask(t)} className="apple-pill text-sm mt-2">Submit Work for Review</button>
+                            )}
+                            {t.status === 'submitted' && isClient && (
+                              <div className="flex items-center space-x-2 mt-2">
+                                <button onClick={() => handleAcceptTask(t)} className="apple-pill text-sm">Accept & Release Funds</button>
+                                <button onClick={() => handleDisputeTask(t)} className="apple-pill-ghost text-sm border-red-300 text-red-500 hover:bg-red-50">Dispute</button>
+                              </div>
+                            )}
+                            {t.disputeReason && (
+                              <p className="text-fine text-red-500 mt-2">Dispute reason: {t.disputeReason}</p>
+                            )}
                           </div>
-                          <div className="flex items-center space-x-3">
-                            <StatusBadge status={t.status} />
-                            <span className="text-fine text-action-blue">View →</span>
-                          </div>
-                        </a>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -360,9 +434,11 @@ function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     open: 'bg-blue-50 text-blue-600',
     claimed: 'bg-orange-50 text-orange-600',
+    submitted: 'bg-purple-50 text-purple-600',
     completed: 'bg-green-50 text-green-600',
     cancelled: 'bg-gray-50 text-gray-600',
     expired: 'bg-gray-50 text-gray-600',
+    disputed: 'bg-red-50 text-red-600',
   };
   return <span className={`text-micro px-3 py-1 rounded-utility capitalize font-medium ${styles[status] || styles.cancelled}`}>{status}</span>;
 }
