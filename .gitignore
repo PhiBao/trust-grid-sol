@@ -16,6 +16,11 @@ tsconfig.tsbuildinfo
 
 # Environment
 .env
+PROJECT_DETAIL.md
 
 # Local Solana wallets / demo keypairs
 .config/
+agents/
+delegate-key.json
+agent-*-key.json
+agent-*.json

@@ -16,12 +16,7 @@ import {
   getSOLBalance,
 } from "../lib/transactions";
 import { getTxUrl } from "../lib/constants";
-import {
-  getOrCreateDelegateKey,
-  revokeDelegateKey,
-  isAgentModeEnabled,
-  setAgentMode,
-} from "../lib/agent-mode";
+import { generateAgentKeypair, downloadKeypair } from "../lib/agent-wallet";
 import Layout from "../components/Layout";
 
 const RPC_URL =
@@ -47,33 +42,6 @@ export default function DashboardPage() {
   const [solBalance, setSolBalance] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Agent Mode state
-  const [agentMode, setAgentMode] = useState(false);
-  const [delegateKey, setDelegateKey] = useState<string | null>(null);
-
-  useEffect(() => {
-    setAgentMode(isAgentModeEnabled());
-    const dk = getOrCreateDelegateKey();
-    setDelegateKey(dk ? dk.publicKey.toBase58() : null);
-  }, []);
-
-  const toggleAgentMode = () => {
-    const next = !agentMode;
-    setAgentMode(next);
-    setAgentMode(next);
-    if (next) {
-      const dk = getOrCreateDelegateKey();
-      setDelegateKey(dk ? dk.publicKey.toBase58() : null);
-    }
-  };
-
-  const handleRevokeDelegate = () => {
-    revokeDelegateKey();
-    setDelegateKey(null);
-    setAgentMode(false);
-    setAgentMode(false);
-  };
-
   // Register form state
   const [regName, setRegName] = useState("");
   const [regSkill, setRegSkill] = useState("");
@@ -84,6 +52,8 @@ export default function DashboardPage() {
   const [regDesc, setRegDesc] = useState("");
   const [regUri, setRegUri] = useState("");
   const [regLoading, setRegLoading] = useState(false);
+  const [generateKey, setGenerateKey] = useState(false);
+  const [generatedWallet, setGeneratedWallet] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([fetchAgents(), fetchTasks()]).then(([a, t]) => {
@@ -123,6 +93,16 @@ export default function DashboardPage() {
     }
     setRegLoading(true);
     try {
+      let authority = publicKey;
+      let agentKeypair = null;
+
+      if (generateKey) {
+        const generated = generateAgentKeypair();
+        agentKeypair = generated;
+        authority = generated.publicKey;
+        setGeneratedWallet(generated.publicKey.toBase58());
+      }
+
       const metadata: Record<string, string> = {
         name: regName.trim(),
         skill: regSkill.trim() || "general",
@@ -134,12 +114,30 @@ export default function DashboardPage() {
       };
       const { tx, agentId } = await buildRegisterAgentTx(
         connection,
-        publicKey,
+        authority,
         regUri.trim(),
         metadata
       );
-      const sig = await sendTxRobust(tx, connection, wallet?.adapter);
-      showToast(`Agent #${agentId} registered on-chain!`, sig);
+
+      let sig: string;
+      if (agentKeypair) {
+        tx.sign(agentKeypair);
+        const raw = tx.serialize();
+        sig = await connection.sendRawTransaction(raw, {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+        });
+        await connection.confirmTransaction(sig, "confirmed");
+      } else {
+        sig = await sendTxRobust(tx, connection, wallet?.adapter);
+      }
+
+      showToast(`Agent #${agentId} registered on-chain${generateKey ? " with own wallet!" : "!"}`, sig);
+
+      if (agentKeypair) {
+        downloadKeypair(agentKeypair, regName.trim());
+      }
+
       setRegName("");
       setRegSkill("");
       setRegCategory("security");
@@ -154,6 +152,7 @@ export default function DashboardPage() {
       showToast(e.message?.slice(0, 80) || "Registration failed");
     } finally {
       setRegLoading(false);
+      setGeneratedWallet(null);
     }
   };
 
@@ -234,22 +233,40 @@ export default function DashboardPage() {
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {myAgents.map((a) => (
-                      <div
-                        key={a.agentId}
-                        className="bg-parchment rounded-utility p-4"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-caption-strong text-ink">
-                            {getAgentName(a)}
-                          </p>
-                          <span className="text-micro text-action-blue bg-action-blue/5 px-2 py-0.5 rounded-utility capitalize">
-                            {getAgentCategory(a)}
-                          </span>
+                    {myAgents.map((a) => {
+                      const hasOwnWallet = publicKey && a.authority !== publicKey.toBase58();
+                      return (
+                        <div
+                          key={a.agentId}
+                          className="bg-parchment rounded-utility p-4"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-caption-strong text-ink">
+                              {getAgentName(a)}
+                            </p>
+                            <span className="text-micro text-action-blue bg-action-blue/5 px-2 py-0.5 rounded-utility capitalize">
+                              {getAgentCategory(a)}
+                            </span>
+                          </div>
+                          <p className="text-fine text-ink/40">ID #{a.agentId}</p>
+                          {hasOwnWallet ? (
+                            <div className="mt-2 bg-amber-50 border border-amber-200 rounded-utility p-2.5">
+                              <div className="flex items-center space-x-1.5 mb-1">
+                                <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                                <span className="text-micro text-amber-700 font-medium">Agent-Owned Wallet</span>
+                              </div>
+                              <p className="text-fine text-ink/50 font-mono break-all">{a.authority}</p>
+                              <p className="text-micro text-amber-600 mt-1">⚠️ Fund this wallet with SOL + USDC for agent to operate</p>
+                            </div>
+                          ) : (
+                            <div className="mt-2 flex items-center space-x-1.5">
+                              <span className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                              <span className="text-micro text-blue-600">Uses your wallet</span>
+                            </div>
+                          )}
                         </div>
-                        <p className="text-fine text-ink/40">ID #{a.agentId}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -284,64 +301,6 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              {/* Agent Mode */}
-              <div className="bg-white rounded-card border border-hairline p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-section text-ink">Agent Mode</h3>
-                    <p className="text-caption-apple text-ink/50 mt-1">
-                      Let your AI agent hire other agents autonomously via MCP.
-                    </p>
-                  </div>
-                  <button
-                    onClick={toggleAgentMode}
-                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
-                      agentMode ? "bg-action-blue" : "bg-ink/20"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                        agentMode ? "translate-x-6" : "translate-x-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-                {agentMode ? (
-                  <div className="space-y-3">
-                    <div className="bg-green-50 rounded-utility p-3 flex items-center space-x-2">
-                      <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                      <span className="text-caption-apple text-green-700">
-                        Agent Mode is active
-                      </span>
-                    </div>
-                    {delegateKey && (
-                      <div className="bg-parchment rounded-utility p-3">
-                        <span className="text-fine text-ink/40 block mb-1">
-                          Delegated Key
-                        </span>
-                        <p className="text-caption-apple text-ink font-mono break-all">
-                          {delegateKey}
-                        </p>
-                      </div>
-                    )}
-                    <p className="text-fine text-ink/40">
-                      Your AI agent can now sign transactions autonomously via
-                      the MCP server. All actions are still logged on-chain.
-                    </p>
-                    <button
-                      onClick={handleRevokeDelegate}
-                      className="apple-pill-ghost text-sm border-red-300 text-red-500 hover:bg-red-50"
-                    >
-                      Revoke Delegate Key
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-body-apple text-ink/50">
-                    Enable Agent Mode to let your AI agent hire other agents
-                    through the MCP server without manual wallet prompts.
-                  </p>
-                )}
-              </div>
             </div>
           )}
 
@@ -513,6 +472,30 @@ export default function DashboardPage() {
                   />
                 </div>
 
+                {/* Agent-first toggle */}
+                <div className="bg-parchment rounded-utility p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-caption-strong text-ink">Generate Agent Wallet</p>
+                      <p className="text-fine text-ink/50 mt-0.5">Creates a dedicated keypair so the agent can sign autonomously</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setGenerateKey(!generateKey)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${generateKey ? "bg-action-blue" : "bg-ink/20"}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${generateKey ? "translate-x-6" : "translate-x-1"}`} />
+                    </button>
+                  </div>
+                  {generateKey && generatedWallet && (
+                    <div className="mt-3 bg-white rounded-utility p-3 border border-hairline">
+                      <span className="text-fine text-ink/40 block mb-1">Agent Wallet Address</span>
+                      <p className="text-caption-apple text-ink font-mono break-all">{generatedWallet}</p>
+                      <p className="text-fine text-amber-600 mt-2">⚠️ Keypair file downloaded — keep it safe!</p>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   onClick={handleRegister}
                   disabled={regLoading || !connected}
@@ -521,7 +504,7 @@ export default function DashboardPage() {
                   {regLoading
                     ? "Registering..."
                     : connected
-                    ? "Register Agent On-Chain"
+                    ? generateKey ? "Register with New Wallet" : "Register Agent On-Chain"
                     : "Connect Wallet to Register"}
                 </button>
               </div>

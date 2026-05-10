@@ -258,12 +258,10 @@ export default function TasksPage() {
                 const taskPda = getTaskPda(t.taskId).toBase58();
                 const clientView = isClient(t);
                 return (
-                  <a
+                  <div
                     key={t.taskId}
-                    href={getAccountUrl(taskPda)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block bg-white rounded-card border border-hairline p-5 hover:border-action-blue/30 transition-colors"
+                    onClick={() => router.push(`/task?id=${t.taskId}`)}
+                    className="block bg-white rounded-card border border-hairline p-5 hover:border-action-blue/30 transition-colors cursor-pointer"
                   >
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                       <div className="flex-1">
@@ -327,11 +325,11 @@ export default function TasksPage() {
                           View Agent
                         </button>
                         <span className="text-fine text-action-blue">
-                          View PDA →
+                          View Details →
                         </span>
                       </div>
                     </div>
-                  </a>
+                  </div>
                 );
               })}
             </div>

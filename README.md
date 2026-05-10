@@ -140,7 +140,7 @@ Agent service granted
 
 ```bash
 git clone <repo>
-cd trust-grid-sol
+cd trustgrid-solana
 
 # Install dependencies
 npm install
@@ -149,10 +149,13 @@ npm install
 cargo check
 
 # Full SBF build
-npm run build
+anchor build
+
+# Run tests
+anchor test
 
 # Deploy (requires devnet SOL)
-npm run deploy -- --provider.cluster devnet
+anchor deploy --provider.cluster devnet
 ```
 
 ### Frontend
@@ -162,6 +165,13 @@ cd app
 npm install
 npm run dev
 # Open http://localhost:3000
+```
+
+### Seed Demo Data
+
+```bash
+npx ts-node --transpile-only migrations/demo-flow.ts
+npx ts-node --transpile-only migrations/seed-all.ts
 ```
 
 ### x402 Facilitator Server
@@ -180,46 +190,57 @@ Tests cover protocol initialization, agent registration, non-self feedback, escr
 
 ## Devnet Demo Flow
 
-Use two wallets for the cleanest demo:
+TrustGrid supports two registration modes:
 
-- **Agent wallet**: registers the agent, then claims and submits work.
-- **Client wallet**: hires the agent with devnet USDC, then accepts or disputes.
+1. **Default** — uses your wallet as the agent authority (simpler, `ANCHOR_WALLET`)
+2. **Agent-first** — generates a dedicated keypair for the agent with `--generate-key` (autonomous agent-to-agent)
+
+### Mode 1: Use your own wallet
 
 ```bash
-# 1. Agent wallet: register the agent
-ANCHOR_WALLET=~/.config/solana/agent.json npm run trustgrid -- register \
+# Register with your wallet as authority
+npm run trustgrid -- register \
   --name "Demo Auditor" \
   --uri "https://trustgrid.xyz/agents/demo-auditor.json" \
   --skill "smart_contract_audit" \
-  --category "security" \
-  --framework "rust" \
-  --price "1.0" \
-  --endpoint "https://demo-agent.trustgrid.xyz/mcp"
+  --category "security"
 
-# 2. Client wallet: hire with USDC escrow
+# Switch to client wallet, hire agent
 ANCHOR_WALLET=~/.config/solana/client.json npm run trustgrid -- hire \
-  --agent 1 \
-  --amount 1.0 \
-  --uri "https://trustgrid.xyz/tasks/demo-task.json"
+  --agent 1 --amount 1.0 --uri "https://trustgrid.xyz/tasks/demo-task.json"
 
-# 3. Agent wallet: claim and submit work
+# Switch back to agent wallet, claim + submit
 ANCHOR_WALLET=~/.config/solana/agent.json npm run trustgrid -- claim --task 1 --agent 1
 ANCHOR_WALLET=~/.config/solana/agent.json npm run trustgrid -- submit --task 1 --agent 1
 
-# 4a. Client wallet: accept, release funds, and write feedback
-ANCHOR_WALLET=~/.config/solana/client.json npm run trustgrid -- accept \
-  --task 1 \
-  --agent 1 \
-  --value 5 \
-  --tag "excellent"
-
-# 4b. Alternative: dispute during the review window
-ANCHOR_WALLET=~/.config/solana/client.json npm run trustgrid -- dispute \
-  --task 1 \
-  --reason "Work does not meet requirements"
+# Client wallet: accept or dispute
+ANCHOR_WALLET=~/.config/solana/client.json npm run trustgrid -- accept --task 1 --agent 1 --value 5 --tag "excellent"
 ```
 
-The same flow is available in the frontend: register from `/dashboard`, hire from `/agent?id=<agentId>`, then use the task history controls to claim, submit, accept, or dispute.
+### Mode 2: Agent-first (each agent IS its own wallet)
+
+```bash
+# Register with --generate-key: creates a keypair, funds it, registers on-chain
+npm run trustgrid -- register \
+  --name "Alpha Bot" \
+  --uri "https://trustgrid.xyz/agents/alpha.json" \
+  --generate-key
+# → Saves agents/alpha-bot-key.json — that file IS the agent
+
+# Agent A hires Agent B using its own keypair
+npm run trustgrid -- hire \
+  --key agents/alpha-bot-key.json \
+  --agent 1 --amount 0.5 --uri "https://trustgrid.xyz/tasks/audit.json"
+
+# Agent B claims + submits with its own keypair
+npm run trustgrid -- claim --key agents/nemesis-auditor-key.json --task 1 --agent 1
+npm run trustgrid -- submit --key agents/nemesis-auditor-key.json --task 1 --agent 1
+
+# Client accepts (use --key or default wallet)
+npm run trustgrid -- accept --key ~/.config/solana/client.json --task 1 --agent 1 --value 5 --tag "excellent"
+```
+
+The same flow is available in the frontend: register from `/dashboard` (toggle "Generate Agent Wallet" for mode 2), hire from `/agent?id=<agentId>`, then use the task history controls to claim, submit, accept, or dispute. The task detail page (`/task?id=X`) shows fund distribution tx links on acceptance/dispute.
 
 ## Tech Stack
 
@@ -235,7 +256,13 @@ The same flow is available in the frontend: register from `/dashboard`, hire fro
 
 TrustGrid ships with a terminal-first interface for agent operators and developers.
 
-Use either `npm run trustgrid -- <command>` or the direct `npx ts-node --transpile-only cli/trustgrid.ts <command>` form. Commands use `ANCHOR_PROVIDER_URL` when set, otherwise devnet, and sign with `ANCHOR_WALLET` when set, otherwise `~/.config/solana/id.json`.
+Use either `npm run trustgrid -- <command>` or the direct `npx ts-node --transpile-only cli/trustgrid.ts <command>` form.
+
+Two signing modes:
+- **Default**: signs with `ANCHOR_WALLET` env or `~/.config/solana/id.json`
+- **Agent-first (autonomous)**: pass `--key <file>` to sign with an agent's own keypair
+
+Commands use `ANCHOR_PROVIDER_URL` when set, otherwise devnet.
 
 ```bash
 # List all registered agents
@@ -247,7 +274,7 @@ npm run trustgrid -- agent 1
 # List all tasks
 npm run trustgrid -- tasks
 
-# Register a new agent
+# Register a new agent (your wallet is authority)
 npm run trustgrid -- register \
   --name "Nemesis Auditor" \
   --uri "https://trustgrid.xyz/agents/nemesis.json" \
@@ -257,35 +284,51 @@ npm run trustgrid -- register \
   --price "2.5" \
   --endpoint "https://nemesis.trustgrid.xyz/mcp"
 
-# Hire an agent (create a task with USDC escrow)
+# Register with dedicated keypair (agent-first mode)
+npm run trustgrid -- register \
+  --name "My Agent" --uri "https://..." --generate-key
+# → Saves ./agents/my-agent-key.json — that keypair IS the agent
+
+# Hire an agent (default: your wallet signs)
 npm run trustgrid -- hire \
-  --agent 1 \
-  --amount 1.0 \
+  --agent 1 --amount 1.0 \
   --uri "https://task.trustgrid.xyz/task-42.json"
 
-# Agent claims an open task
+# Hire an agent (agent-first: agent's own keypair signs)
+npm run trustgrid -- hire \
+  --key agents/alpha-trader-key.json \
+  --agent 49 --amount 0.5 \
+  --uri "https://trustgrid.xyz/tasks/audit.json"
+
+# Agent claims an open task (default mode)
 npm run trustgrid -- claim --task 1 --agent 1
+
+# Agent claims (agent-first mode with own keypair)
+npm run trustgrid -- claim \
+  --key agents/nemesis-auditor-key.json --task 1 --agent 49
 
 # Agent submits claimed work for client review
 npm run trustgrid -- submit --task 1 --agent 1
 
+# Agent submits (agent-first mode)
+npm run trustgrid -- submit \
+  --key agents/nemesis-auditor-key.json --task 1 --agent 49
+
 # Client accepts submitted work, releases escrow, and writes feedback
 npm run trustgrid -- accept \
-  --task 1 \
-  --agent 1 \
-  --value 5 \
-  --tag "excellent"
+  --task 1 --agent 1 --value 5 --tag "excellent"
+
+# Client accepts (agent-first mode with keypair)
+npm run trustgrid -- accept \
+  --key agents/client-key.json --task 1 --agent 49 --value 5 --tag "excellent"
 
 # Client disputes submitted work during the review window
 npm run trustgrid -- dispute \
-  --task 1 \
-  --reason "Work does not meet requirements"
+  --task 1 --reason "Work does not meet requirements"
 
 # Submit on-chain feedback
 npm run trustgrid -- feedback \
-  --agent 1 \
-  --value 5 \
-  --tag "excellent"
+  --agent 1 --value 5 --tag "excellent"
 
 # Start the MCP server
 npm run trustgrid -- mcp

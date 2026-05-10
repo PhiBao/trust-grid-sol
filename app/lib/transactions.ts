@@ -632,3 +632,47 @@ export async function getOrCreateUSDCATA(
   const info = await connection.getAccountInfo(ata);
   return { ata, exists: !!info };
 }
+
+function createTransferInstruction(
+  source: PublicKey,
+  destination: PublicKey,
+  authority: PublicKey,
+  amount: number
+): TransactionInstruction {
+  const data = Buffer.alloc(9);
+  data[0] = 3; // Transfer instruction index
+  data.writeBigUInt64LE(BigInt(amount), 1);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: source, isSigner: false, isWritable: true },
+      { pubkey: destination, isSigner: false, isWritable: true },
+      { pubkey: authority, isSigner: true, isWritable: false },
+    ],
+    programId: TOKEN_PROGRAM_ID,
+    data,
+  });
+}
+
+export async function buildTransferUSDCTx(
+  connection: Connection,
+  fromPubkey: PublicKey,
+  toPubkey: PublicKey,
+  amountUSDC: number
+): Promise<Transaction> {
+  const rawAmount = Math.round(amountUSDC * 1_000_000);
+  const fromATA = await getAssociatedTokenAddress(USDC_MINT, fromPubkey, false);
+  const { ata: toATA, exists: toATAExists } = await getOrCreateUSDCATA(connection, toPubkey);
+
+  const tx = new Transaction();
+  if (!toATAExists) {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        fromPubkey, toATA, toPubkey, USDC_MINT
+      )
+    );
+  }
+  tx.add(
+    createTransferInstruction(fromATA, toATA, fromPubkey, rawAmount)
+  );
+  return tx;
+}

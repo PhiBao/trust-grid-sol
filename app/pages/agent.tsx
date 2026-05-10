@@ -603,7 +603,8 @@ export default function AgentDetailPage() {
                         return (
                           <div
                             key={t.taskId}
-                            className="bg-parchment rounded-utility p-4 hover:border-action-blue/30 border border-transparent transition-colors"
+                            className="bg-parchment rounded-utility p-4 hover:border-action-blue/30 border border-transparent transition-colors cursor-pointer"
+                            onClick={() => router.push(`/task?id=${t.taskId}`)}
                           >
                             <div className="flex items-center justify-between mb-2">
                               <div>
@@ -625,22 +626,15 @@ export default function AgentDetailPage() {
                                     {getReviewTimeLeft(t.submittedAt)}
                                   </span>
                                 )}
-                                <a
-                                  href={getAccountUrl(
-                                    getTaskPda(t.taskId).toBase58()
-                                  )}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-fine text-action-blue"
-                                >
-                                  View →
-                                </a>
+                                <span className="text-fine text-action-blue">
+                                  Details →
+                                </span>
                               </div>
                             </div>
                             {/* Action buttons */}
                             {t.status === "open" && canActAsAgent && (
                               <button
-                                onClick={() => handleClaimTask(t)}
+                                onClick={(e) => { e.stopPropagation(); handleClaimTask(t); }}
                                 disabled={taskActionLoading}
                                 className="apple-pill text-sm mt-2 disabled:opacity-50"
                               >
@@ -649,7 +643,7 @@ export default function AgentDetailPage() {
                             )}
                             {t.status === "claimed" && isClaimedByMe && (
                               <button
-                                onClick={() => handleSubmitTask(t)}
+                                onClick={(e) => { e.stopPropagation(); handleSubmitTask(t); }}
                                 disabled={taskActionLoading}
                                 className="apple-pill text-sm mt-2 disabled:opacity-50"
                               >
@@ -659,14 +653,14 @@ export default function AgentDetailPage() {
                             {t.status === "submitted" && isClient && (
                               <div className="flex items-center space-x-2 mt-2">
                                 <button
-                                  onClick={() => setReviewTask(t)}
+                                  onClick={(e) => { e.stopPropagation(); setReviewTask(t); }}
                                   disabled={taskActionLoading}
                                   className="apple-pill text-sm disabled:opacity-50"
                                 >
                                   Accept & Release Funds
                                 </button>
                                 <button
-                                  onClick={() => setDisputeTask(t)}
+                                  onClick={(e) => { e.stopPropagation(); setDisputeTask(t); }}
                                   disabled={taskActionLoading}
                                   className="apple-pill-ghost text-sm border-red-300 text-red-500 hover:bg-red-50 disabled:opacity-50"
                                 >
@@ -720,6 +714,25 @@ export default function AgentDetailPage() {
                   <p className="text-fine text-ink/40 text-center">
                     1% protocol fee applies
                   </p>
+                </div>
+
+                <div className="bg-white rounded-card border border-hairline p-6">
+                  <h3 className="text-section text-ink mb-3">Agent Wallet</h3>
+                  {isAgentAuthority || isAgentWallet ? (
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                      <span className="text-micro text-blue-600">Uses your wallet</span>
+                    </div>
+                  ) : (
+                    <div className="bg-amber-50 border border-amber-200 rounded-utility p-3">
+                      <div className="flex items-center space-x-1.5 mb-2">
+                        <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                        <span className="text-micro text-amber-700 font-medium">Agent-Owned Wallet</span>
+                      </div>
+                      <p className="text-fine text-ink/50 font-mono break-all mb-2">{agent.authority}</p>
+                      <p className="text-micro text-amber-600">⚠️ Fund this wallet with SOL + USDC for agent-to-agent hiring</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-parchment rounded-card p-4">
