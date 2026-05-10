@@ -6,23 +6,28 @@ import {
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
-import {
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
 import { PROGRAM_ID, USDC_MINT } from "./constants";
+
+const TOKEN_PROGRAM_ID = new PublicKey(
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+);
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+);
 
 // Anchor discriminators (sha256("global:<name>")[0:8])
 const DISC = {
   giveFeedback: Buffer.from([0x91, 0x88, 0x7b, 0x03, 0xd7, 0xa5, 0x62, 0x29]),
   createTask: Buffer.from([0xc2, 0x50, 0x06, 0xb4, 0xe8, 0x7f, 0x30, 0xab]),
   registerAgent: Buffer.from([0x87, 0x9d, 0x42, 0xc3, 0x02, 0x71, 0xaf, 0x1e]),
+  claimTask: Buffer.from([0x31, 0xde, 0xdb, 0xee, 0x9b, 0x44, 0xdd, 0x88]),
   submitTask: Buffer.from([0x94, 0xb7, 0x1a, 0x74, 0x6b, 0xd5, 0x76, 0xd5]),
   acceptTask: Buffer.from([0xde, 0xc4, 0x4f, 0xa5, 0x78, 0x1e, 0x26, 0x78]),
   disputeTask: Buffer.from([0x8c, 0x62, 0xbf, 0xa8, 0x9a, 0x76, 0x32, 0x62]),
   completeTask: Buffer.from([0x6d, 0xa7, 0xc0, 0x29, 0x81, 0x6c, 0xdc, 0xc4]),
 };
+
+const DEFAULT_PUBKEY = new PublicKey("11111111111111111111111111111111");
 
 function toU64LE(n: number): Buffer {
   const b = Buffer.alloc(8);
@@ -46,6 +51,43 @@ function writeString(buf: string): Buffer {
 function getPda(seeds: Buffer[]): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(seeds, PROGRAM_ID);
   return pda;
+}
+
+function getAssociatedTokenAddress(
+  mint: PublicKey,
+  owner: PublicKey,
+  allowOwnerOffCurve = false
+): PublicKey {
+  if (!allowOwnerOffCurve && !PublicKey.isOnCurve(owner.toBuffer())) {
+    throw new Error("Token owner is off curve");
+  }
+
+  const [address] = PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  return address;
+}
+
+function createAssociatedTokenAccountInstruction(
+  payer: PublicKey,
+  associatedToken: PublicKey,
+  owner: PublicKey,
+  mint: PublicKey
+): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: associatedToken, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: false, isWritable: false },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+    ],
+    programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+    data: Buffer.alloc(0),
+  });
 }
 
 // ───────────────────────────────────────────
@@ -141,12 +183,16 @@ export async function buildGiveFeedbackTx(
     PROGRAM_ID
   );
 
-  const data = Buffer.concat([DISC.giveFeedback, Buffer.from([value]), writeString(tag)]);
+  const data = Buffer.concat([
+    DISC.giveFeedback,
+    Buffer.from([value]),
+    writeString(tag),
+  ]);
 
   const ix = new TransactionInstruction({
     keys: [
       { pubkey: client, isSigner: true, isWritable: true },
-      { pubkey: agentPda, isSigner: false, isWritable: false },
+      { pubkey: agentPda, isSigner: false, isWritable: true },
       { pubkey: repPda, isSigner: false, isWritable: true },
       { pubkey: feedbackPda, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -249,6 +295,44 @@ export async function buildCreateTaskTx(
 }
 
 // ───────────────────────────────────────────
+// CLAIM TASK (agent accepts assignment)
+// ───────────────────────────────────────────
+
+export async function buildClaimTaskTx(
+  connection: Connection,
+  claimer: PublicKey,
+  taskId: number,
+  agentId: number,
+  agentAuthority: PublicKey
+): Promise<Transaction> {
+  const [taskPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("task"), toU64LE(taskId)],
+    PROGRAM_ID
+  );
+  const agentPda = getPda([
+    Buffer.from("agent"),
+    agentAuthority.toBuffer(),
+    toU64LE(agentId),
+  ]);
+
+  const ix = new TransactionInstruction({
+    keys: [
+      { pubkey: claimer, isSigner: true, isWritable: true },
+      { pubkey: taskPda, isSigner: false, isWritable: true },
+      { pubkey: agentPda, isSigner: false, isWritable: true },
+    ],
+    programId: PROGRAM_ID,
+    data: DISC.claimTask,
+  });
+
+  const tx = new Transaction().add(ix);
+  tx.feePayer = claimer;
+  const { blockhash } = await connection.getLatestBlockhash();
+  tx.recentBlockhash = blockhash;
+  return tx;
+}
+
+// ───────────────────────────────────────────
 // SUBMIT TASK (agent marks work as done for review)
 // ───────────────────────────────────────────
 
@@ -263,7 +347,11 @@ export async function buildSubmitTaskTx(
     [Buffer.from("task"), toU64LE(taskId)],
     PROGRAM_ID
   );
-  const agentPda = getPda([Buffer.from("agent"), agentAuthority.toBuffer(), toU64LE(agentId)]);
+  const agentPda = getPda([
+    Buffer.from("agent"),
+    agentAuthority.toBuffer(),
+    toU64LE(agentId),
+  ]);
 
   const data = Buffer.concat([DISC.submitTask]);
 
@@ -293,6 +381,8 @@ export async function buildAcceptTaskTx(
   client: PublicKey,
   taskId: number,
   agentId: number,
+  agentAuthority: PublicKey,
+  agentWallet: PublicKey | null,
   feedbackValue: number,
   feedbackTag: string
 ): Promise<Transaction> {
@@ -301,7 +391,11 @@ export async function buildAcceptTaskTx(
     PROGRAM_ID
   );
   const protocolPda = getPda([Buffer.from("protocol_state")]);
-  const agentPda = getPda([Buffer.from("agent"), client.toBuffer(), toU64LE(agentId)]);
+  const agentPda = getPda([
+    Buffer.from("agent"),
+    agentAuthority.toBuffer(),
+    toU64LE(agentId),
+  ]);
   const repPda = getPda([Buffer.from("reputation"), toU64LE(agentId)]);
 
   let feedbackCount = 0;
@@ -311,7 +405,12 @@ export async function buildAcceptTaskTx(
   }
 
   const [feedbackPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("feedback"), toU64LE(agentId), client.toBuffer(), toU64LE(feedbackCount)],
+    [
+      Buffer.from("feedback"),
+      toU64LE(agentId),
+      client.toBuffer(),
+      toU64LE(feedbackCount),
+    ],
     PROGRAM_ID
   );
 
@@ -327,7 +426,19 @@ export async function buildAcceptTaskTx(
   }
 
   const feeATA = await getAssociatedTokenAddress(USDC_MINT, feeWallet, false);
-  const agentATA = await getAssociatedTokenAddress(USDC_MINT, client, false);
+  const agentPayoutWallet =
+    agentWallet && !agentWallet.equals(DEFAULT_PUBKEY)
+      ? agentWallet
+      : agentAuthority;
+  const agentATA = await getAssociatedTokenAddress(
+    USDC_MINT,
+    agentPayoutWallet,
+    false
+  );
+  const [feeAtaInfo, agentAtaInfo] = await Promise.all([
+    connection.getAccountInfo(feeATA),
+    connection.getAccountInfo(agentATA),
+  ]);
 
   const data = Buffer.concat([
     DISC.acceptTask,
@@ -335,25 +446,49 @@ export async function buildAcceptTaskTx(
     writeString(feedbackTag),
   ]);
 
-  const ix = new TransactionInstruction({
-    keys: [
-      { pubkey: client, isSigner: true, isWritable: true },
-      { pubkey: taskPda, isSigner: false, isWritable: true },
-      { pubkey: protocolPda, isSigner: false, isWritable: true },
-      { pubkey: agentPda, isSigner: false, isWritable: false },
-      { pubkey: repPda, isSigner: false, isWritable: true },
-      { pubkey: feedbackPda, isSigner: false, isWritable: true },
-      { pubkey: escrowVault, isSigner: false, isWritable: true },
-      { pubkey: feeATA, isSigner: false, isWritable: true },
-      { pubkey: agentATA, isSigner: false, isWritable: true },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    programId: PROGRAM_ID,
-    data,
-  });
+  const tx = new Transaction();
 
-  const tx = new Transaction().add(ix);
+  if (!feeAtaInfo) {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        client,
+        feeATA,
+        feeWallet,
+        USDC_MINT
+      )
+    );
+  }
+  if (!agentAtaInfo && !agentATA.equals(feeATA)) {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        client,
+        agentATA,
+        agentPayoutWallet,
+        USDC_MINT
+      )
+    );
+  }
+
+  tx.add(
+    new TransactionInstruction({
+      keys: [
+        { pubkey: client, isSigner: true, isWritable: true },
+        { pubkey: taskPda, isSigner: false, isWritable: true },
+        { pubkey: protocolPda, isSigner: false, isWritable: true },
+        { pubkey: agentPda, isSigner: false, isWritable: true },
+        { pubkey: repPda, isSigner: false, isWritable: true },
+        { pubkey: feedbackPda, isSigner: false, isWritable: true },
+        { pubkey: escrowVault, isSigner: false, isWritable: true },
+        { pubkey: feeATA, isSigner: false, isWritable: true },
+        { pubkey: agentATA, isSigner: false, isWritable: true },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM_ID,
+      data,
+    })
+  );
+
   tx.feePayer = client;
   const { blockhash } = await connection.getLatestBlockhash();
   tx.recentBlockhash = blockhash;
@@ -375,10 +510,7 @@ export async function buildDisputeTaskTx(
     PROGRAM_ID
   );
 
-  const data = Buffer.concat([
-    DISC.disputeTask,
-    writeString(reason),
-  ]);
+  const data = Buffer.concat([DISC.disputeTask, writeString(reason)]);
 
   const ix = new TransactionInstruction({
     keys: [
@@ -407,11 +539,33 @@ export async function sendTxRobust(
 ): Promise<string> {
   // 1. Simulate first to catch errors before wallet sees them
   try {
-    const sim = await connection.simulateTransaction(tx);
+    const raw = tx.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    });
+    const simRes = await (connection as any)._rpcRequest(
+      "simulateTransaction",
+      [
+        raw.toString("base64"),
+        {
+          encoding: "base64",
+          commitment: "confirmed",
+          sigVerify: false,
+        },
+      ]
+    );
+    if (simRes.error) {
+      throw new Error(`Simulation failed: ${simRes.error.message}`);
+    }
+    const sim = simRes.result;
     if (sim.value.err) {
       const logs = sim.value.logs || [];
-      const errLine = logs.find((l: string) => l.includes("Error") || l.includes("failed"));
-      throw new Error(errLine || `Simulation failed: ${JSON.stringify(sim.value.err)}`);
+      const errLine = logs.find(
+        (l: string) => l.includes("Error") || l.includes("failed")
+      );
+      throw new Error(
+        errLine || `Simulation failed: ${JSON.stringify(sim.value.err)}`
+      );
     }
   } catch (e: any) {
     if (!e.message?.includes("Simulation failed")) {

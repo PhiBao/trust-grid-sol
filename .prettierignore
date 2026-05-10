@@ -2,6 +2,8 @@
 .DS_Store
 target
 node_modules
+app/node_modules
+app/.next
 dist
 build
 test-ledger
