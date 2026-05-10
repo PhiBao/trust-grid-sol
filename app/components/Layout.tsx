@@ -38,8 +38,9 @@ export default function Layout({ children }: LayoutProps) {
             {/* Logo */}
             <button
               onClick={() => router.push('/')}
-              className="text-white font-display text-sm font-semibold tracking-tight-micro"
+              className="flex items-center gap-2 text-white font-display text-sm font-semibold tracking-tight-micro"
             >
+              <img src="/favicon.png" alt="" className="w-5 h-5 rounded-full" />
               TrustGrid
             </button>
 
