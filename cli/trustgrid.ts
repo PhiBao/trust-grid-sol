@@ -26,6 +26,7 @@ import {
 } from "../app/lib/agents";
 import {
   buildRegisterAgentTx, buildCreateTaskTx, buildGiveFeedbackTx,
+  buildSubmitTaskTx, buildAcceptTaskTx, buildDisputeTaskTx,
   sendTxRobust, getUSDCBalance, getSOLBalance,
 } from "../app/lib/transactions";
 import { PROGRAM_ID_STRING, getTxUrl } from "../app/lib/constants";
@@ -40,6 +41,13 @@ function getWallet(): Keypair {
   const keyPath = process.env.ANCHOR_WALLET || `${os.homedir()}/.config/solana/id.json`;
   const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(keyPath, "utf-8")));
   return Keypair.fromSecretKey(secretKey);
+}
+
+function fakeAdapter(wallet: Keypair) {
+  return {
+    signTransaction: async (tx: any) => { tx.sign(wallet); return tx; },
+    sendTransaction: null,
+  } as any;
 }
 
 // ─── agents ───
@@ -159,7 +167,7 @@ program
     const { tx, agentId } = await buildRegisterAgentTx(connection, wallet.publicKey, opts.uri, metadata);
     console.log(chalk.blue(`Registering agent #${agentId}...`));
 
-    const sig = await sendTxRobust(tx, connection, { signTransaction: async (t: any) => { t.sign(wallet); return t; }, sendTransaction: null } as any);
+    const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
     console.log(chalk.green("✅ Agent registered!"));
     console.log(chalk.gray("Tx:"), getTxUrl(sig));
     console.log(chalk.gray("Agent ID:"), agentId);
@@ -186,7 +194,7 @@ program
     const { tx, taskId } = await buildCreateTaskTx(connection, wallet.publicKey, opts.agent, opts.amount, opts.uri);
     console.log(chalk.blue(`Creating task #${taskId} for agent #${opts.agent}...`));
 
-    const sig = await sendTxRobust(tx, connection, { signTransaction: async (t: any) => { t.sign(wallet); return t; }, sendTransaction: null } as any);
+    const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
     console.log(chalk.green("✅ Task created!"));
     console.log(chalk.gray("Tx:"), getTxUrl(sig));
     console.log(chalk.gray("Task ID:"), taskId);
@@ -211,9 +219,71 @@ program
     const tx = await buildGiveFeedbackTx(connection, wallet.publicKey, opts.agent, opts.value, opts.tag, new PublicKey(agent.authority));
     console.log(chalk.blue(`Submitting feedback for agent #${opts.agent}...`));
 
-    const sig = await sendTxRobust(tx, connection, { signTransaction: async (t: any) => { t.sign(wallet); return t; }, sendTransaction: null } as any);
+    const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
     console.log(chalk.green("✅ Feedback submitted!"));
     console.log(chalk.gray("Tx:"), getTxUrl(sig));
+  });
+
+// ─── submit ───
+program
+  .command("submit")
+  .description("Agent submits completed work for client review")
+  .requiredOption("--task <id>", "Task ID", parseInt)
+  .requiredOption("--agent <id>", "Agent ID", parseInt)
+  .action(async (opts) => {
+    const wallet = getWallet();
+    const agents = await fetchAgents();
+    const agent = agents.find((a) => a.agentId === opts.agent);
+    if (!agent) {
+      console.log(chalk.red(`Agent #${opts.agent} not found.`));
+      process.exit(1);
+    }
+
+    const tx = await buildSubmitTaskTx(connection, wallet.publicKey, opts.task, opts.agent, new PublicKey(agent.authority));
+    console.log(chalk.blue(`Submitting task #${opts.task} for review...`));
+
+    const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
+    console.log(chalk.green("✅ Task submitted for client review!"));
+    console.log(chalk.gray("Tx:"), getTxUrl(sig));
+    console.log(chalk.gray("Status:"), "submitted (24h review window)");
+  });
+
+// ─── accept ───
+program
+  .command("accept")
+  .description("Client accepts submitted work — releases funds + feedback")
+  .requiredOption("--task <id>", "Task ID", parseInt)
+  .requiredOption("--agent <id>", "Agent ID", parseInt)
+  .option("--value <value>", "Feedback rating 1-5", "5")
+  .option("--tag <tag>", "Feedback tag", "excellent")
+  .action(async (opts) => {
+    const wallet = getWallet();
+
+    const tx = await buildAcceptTaskTx(connection, wallet.publicKey, opts.task, opts.agent, parseInt(opts.value), opts.tag);
+    console.log(chalk.blue(`Accepting task #${opts.task} and releasing funds...`));
+
+    const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
+    console.log(chalk.green("✅ Task accepted! Funds released to agent."));
+    console.log(chalk.gray("Tx:"), getTxUrl(sig));
+    console.log(chalk.gray("Feedback:"), `${opts.value}★ "${opts.tag}"`);
+  });
+
+// ─── dispute ───
+program
+  .command("dispute")
+  .description("Client disputes submitted work — locks funds")
+  .requiredOption("--task <id>", "Task ID", parseInt)
+  .option("--reason <reason>", "Dispute reason", "Work does not meet requirements")
+  .action(async (opts) => {
+    const wallet = getWallet();
+
+    const tx = await buildDisputeTaskTx(connection, wallet.publicKey, opts.task, opts.reason);
+    console.log(chalk.blue(`Disputing task #${opts.task}...`));
+
+    const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
+    console.log(chalk.green("✅ Task disputed! Funds locked for arbitration."));
+    console.log(chalk.gray("Tx:"), getTxUrl(sig));
+    console.log(chalk.gray("Reason:"), opts.reason);
   });
 
 // ─── mcp ───
