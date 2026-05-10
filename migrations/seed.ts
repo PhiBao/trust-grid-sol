@@ -1,4 +1,11 @@
-import { Connection, PublicKey, Keypair, Transaction, SystemProgram, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  Keypair,
+  Transaction,
+  SystemProgram,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import * as fs from "fs";
 import * as os from "os";
 
@@ -11,12 +18,18 @@ import * as os from "os";
  *   npx ts-node migrations/seed.ts
  */
 
-const PROGRAM_ID = new PublicKey("2Ps1h8YwCTxLo6bHiCaN3xT2r8mdj5qP4hxUPrVoCszE");
-const RPC_URL = process.env.ANCHOR_PROVIDER_URL || "https://api.devnet.solana.com";
+const PROGRAM_ID = new PublicKey(
+  "2Ps1h8YwCTxLo6bHiCaN3xT2r8mdj5qP4hxUPrVoCszE"
+);
+const RPC_URL =
+  process.env.ANCHOR_PROVIDER_URL || "https://api.devnet.solana.com";
 
 // Load wallet from default Solana keypair
-const keypairPath = process.env.ANCHOR_WALLET || `${os.homedir()}/.config/solana/id.json`;
-const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath, "utf-8")));
+const keypairPath =
+  process.env.ANCHOR_WALLET || `${os.homedir()}/.config/solana/id.json`;
+const secretKey = Uint8Array.from(
+  JSON.parse(fs.readFileSync(keypairPath, "utf-8"))
+);
 const wallet = Keypair.fromSecretKey(secretKey);
 
 const connection = new Connection(RPC_URL, "confirmed");
@@ -24,7 +37,9 @@ const connection = new Connection(RPC_URL, "confirmed");
 // Discriminators (first 8 bytes of sha256("global:<instruction_name>"))
 // Anchor uses snake_case for instruction names in discriminators
 const DISCRIMINATOR_INIT = Buffer.from([188, 233, 252, 106, 134, 146, 202, 91]);
-const DISCRIMINATOR_REGISTER = Buffer.from([135, 157, 66, 195, 2, 113, 175, 30]);
+const DISCRIMINATOR_REGISTER = Buffer.from([
+  135, 157, 66, 195, 2, 113, 175, 30,
+]);
 
 function getPda(seeds: Buffer[], programId: PublicKey): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(seeds, programId);
@@ -77,7 +92,11 @@ async function initializeProtocol() {
   }
 }
 
-async function registerAgent(agentUri: string, metadata: [string, string][], agentId: number) {
+async function registerAgent(
+  agentUri: string,
+  metadata: [string, string][],
+  agentId: number
+) {
   const [agentPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("agent"), wallet.publicKey.toBuffer(), toU64LE(agentId)],
     PROGRAM_ID
@@ -89,7 +108,9 @@ async function registerAgent(agentUri: string, metadata: [string, string][], age
 
   const uriEncoded = writeString(agentUri);
 
-  const metaItems = metadata.map(([k, v]) => Buffer.concat([writeString(k), writeString(v)]));
+  const metaItems = metadata.map(([k, v]) =>
+    Buffer.concat([writeString(k), writeString(v)])
+  );
   const metaLen = Buffer.alloc(4);
   metaLen.writeUInt32LE(metadata.length, 0);
   const metaEncoded = Buffer.concat([metaLen, ...metaItems]);
@@ -180,13 +201,21 @@ async function main() {
     if (accountInfo && accountInfo.data.length >= 16) {
       nextId = Number(accountInfo.data.readBigUInt64LE(8)) + 1;
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   for (const agent of agents) {
     console.log(`\n🤖 Registering agent: ${agent.name}`);
     try {
-      const { sig, agentPda } = await registerAgent(agent.uri, agent.metadata, nextId);
-      console.log(`   ✅ Agent #${nextId} registered at ${agentPda.toBase58()}`);
+      const { sig, agentPda } = await registerAgent(
+        agent.uri,
+        agent.metadata,
+        nextId
+      );
+      console.log(
+        `   ✅ Agent #${nextId} registered at ${agentPda.toBase58()}`
+      );
       console.log(`   📝 Signature: ${sig}`);
       nextId++;
     } catch (e: any) {

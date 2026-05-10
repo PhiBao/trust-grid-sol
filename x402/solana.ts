@@ -1,9 +1,19 @@
-import { Connection, PublicKey, Transaction, SystemProgram, Keypair } from "@solana/web3.js";
-import { createTransferCheckedInstruction, getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  SystemProgram,
+  Keypair,
+} from "@solana/web3.js";
+import {
+  createTransferCheckedInstruction,
+  getAssociatedTokenAddress,
+  getAccount,
+} from "@solana/spl-token";
 
 /**
  * x402 Payment Facilitator for Solana
- * 
+ *
  * Handles verification and settlement of x402 payments on Solana.
  * This is a simplified implementation for the Colosseum hackathon.
  */
@@ -151,7 +161,10 @@ export class SolanaFacilitator {
  */
 export function paymentMiddleware(
   facilitator: SolanaFacilitator,
-  priceMap: Record<string, { amount: string; token: string; description: string }>
+  priceMap: Record<
+    string,
+    { amount: string; token: string; description: string }
+  >
 ) {
   return async (req: any, res: any, next: any) => {
     const route = `${req.method} ${req.path}`;
@@ -162,7 +175,7 @@ export function paymentMiddleware(
     }
 
     const paymentHeader = req.headers["x-payment"];
-    
+
     if (!paymentHeader) {
       // Return 402 Payment Required
       const requirements = facilitator.createRequirements(
@@ -171,7 +184,7 @@ export function paymentMiddleware(
         route,
         pricing.description
       );
-      
+
       return res.status(402).json({
         error: "Payment Required",
         requirements,
@@ -191,7 +204,7 @@ export function paymentMiddleware(
       );
 
       const result = await facilitator.verifyPayment(payload, requirements);
-      
+
       if (!result.valid) {
         return res.status(402).json({
           error: "Payment verification failed",
@@ -223,11 +236,11 @@ export async function createPaymentPayload(
 ): Promise<PaymentPayload> {
   const timestamp = Date.now();
   const nonce = `${timestamp}_${Math.random().toString(36).substring(2, 15)}`;
-  
+
   // In production, this would sign the payment intent with the wallet
   // For demo, we create a mock signature
   const message = `${scheme}:${network}:${amount}:${token}:${nonce}:${timestamp}`;
-  
+
   let signature: string;
   if (wallet.signMessage) {
     const messageBytes = new TextEncoder().encode(message);

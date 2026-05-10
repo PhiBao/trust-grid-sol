@@ -9,6 +9,10 @@
  *   npx ts-node cli/trustgrid.ts register --name "My Agent" --uri "https://..."
  *   npx ts-node cli/trustgrid.ts hire --agent 1 --amount 1.0 --uri "https://..."
  *   npx ts-node cli/trustgrid.ts feedback --agent 1 --value 5 --tag "excellent"
+ *   npx ts-node cli/trustgrid.ts claim --task 1 --agent 1
+ *   npx ts-node cli/trustgrid.ts submit --task 1 --agent 1
+ *   npx ts-node cli/trustgrid.ts accept --task 1 --agent 1 --value 5 --tag "excellent"
+ *   npx ts-node cli/trustgrid.ts dispute --task 1 --reason "Work does not meet requirements"
  *   npx ts-node cli/trustgrid.ts mcp
  */
 
@@ -21,31 +25,55 @@ import chalk from "chalk";
 // Re-use app logic by importing from app/lib
 // These work because cli/ is sibling to app/
 import {
-  fetchAgents, fetchTasks, fetchReputation, fetchFeedbacksForAgent,
-  getAgentName, getAgentCategory, getAgentPrice, getAgentSkill,
+  fetchAgents,
+  fetchTasks,
+  fetchReputation,
+  fetchFeedbacksForAgent,
+  getAgentName,
+  getAgentCategory,
+  getAgentPrice,
+  getAgentSkill,
 } from "../app/lib/agents";
 import {
-  buildRegisterAgentTx, buildCreateTaskTx, buildGiveFeedbackTx,
-  buildSubmitTaskTx, buildAcceptTaskTx, buildDisputeTaskTx,
-  sendTxRobust, getUSDCBalance, getSOLBalance,
+  buildRegisterAgentTx,
+  buildCreateTaskTx,
+  buildGiveFeedbackTx,
+  buildClaimTaskTx,
+  buildSubmitTaskTx,
+  buildAcceptTaskTx,
+  buildDisputeTaskTx,
+  sendTxRobust,
+  getUSDCBalance,
+  getSOLBalance,
 } from "../app/lib/transactions";
 import { PROGRAM_ID_STRING, getTxUrl } from "../app/lib/constants";
 
 const program = new Command();
-program.name("trustgrid").description("TrustGrid CLI — On-chain AI agent marketplace").version("0.1.0");
+program
+  .name("trustgrid")
+  .description("TrustGrid CLI — On-chain AI agent marketplace")
+  .version("0.1.0");
+const DEFAULT_PUBKEY = "11111111111111111111111111111111";
 
-const RPC_URL = process.env.ANCHOR_PROVIDER_URL || "https://api.devnet.solana.com";
+const RPC_URL =
+  process.env.ANCHOR_PROVIDER_URL || "https://api.devnet.solana.com";
 const connection = new Connection(RPC_URL, "confirmed");
 
 function getWallet(): Keypair {
-  const keyPath = process.env.ANCHOR_WALLET || `${os.homedir()}/.config/solana/id.json`;
-  const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(keyPath, "utf-8")));
+  const keyPath =
+    process.env.ANCHOR_WALLET || `${os.homedir()}/.config/solana/id.json`;
+  const secretKey = Uint8Array.from(
+    JSON.parse(fs.readFileSync(keyPath, "utf-8"))
+  );
   return Keypair.fromSecretKey(secretKey);
 }
 
 function fakeAdapter(wallet: Keypair) {
   return {
-    signTransaction: async (tx: any) => { tx.sign(wallet); return tx; },
+    signTransaction: async (tx: any) => {
+      tx.sign(wallet);
+      return tx;
+    },
     sendTransaction: null,
   } as any;
 }
@@ -65,11 +93,17 @@ program
       const reviews = rep ? rep.feedbackCount : 0;
       console.log(
         chalk.bold(`#${a.agentId} ${getAgentName(a)}`) +
-        chalk.cyan(`  ${getAgentCategory(a)}`) +
-        chalk.yellow(`  ★${stars}`) +
-        chalk.gray(` (${reviews} reviews)`)
+          chalk.cyan(`  ${getAgentCategory(a)}`) +
+          chalk.yellow(`  ★${stars}`) +
+          chalk.gray(` (${reviews} reviews)`)
       );
-      console.log(chalk.gray(`  Skill: ${getAgentSkill(a)} | Price: ${getAgentPrice(a)} | PDA: ${a.pda.slice(0, 20)}...`));
+      console.log(
+        chalk.gray(
+          `  Skill: ${getAgentSkill(a)} | Price: ${getAgentPrice(
+            a
+          )} | PDA: ${a.pda.slice(0, 20)}...`
+        )
+      );
       console.log();
     }
   });
@@ -87,19 +121,31 @@ program
       process.exit(1);
     }
 
-    console.log(chalk.bold.blue(`\nAgent #${agent.agentId}: ${getAgentName(agent)}\n`));
+    console.log(
+      chalk.bold.blue(`\nAgent #${agent.agentId}: ${getAgentName(agent)}\n`)
+    );
     console.log(chalk.gray("Category:"), getAgentCategory(agent));
     console.log(chalk.gray("Skill:"), getAgentSkill(agent));
     console.log(chalk.gray("Framework:"), agent.metadata.framework || "—");
     console.log(chalk.gray("Price:"), getAgentPrice(agent));
-    console.log(chalk.gray("Status:"), agent.active ? chalk.green("Active") : chalk.red("Inactive"));
+    console.log(
+      chalk.gray("Status:"),
+      agent.active ? chalk.green("Active") : chalk.red("Inactive")
+    );
     console.log(chalk.gray("PDA:"), agent.pda);
     console.log(chalk.gray("URI:"), agent.agentUri);
-    if (agent.metadata.endpoint) console.log(chalk.gray("Endpoint:"), agent.metadata.endpoint);
+    if (agent.metadata.endpoint)
+      console.log(chalk.gray("Endpoint:"), agent.metadata.endpoint);
 
     const rep = await fetchReputation(agentId);
     if (rep && rep.feedbackCount > 0) {
-      console.log(chalk.bold(`\nReputation: ${(rep.averageScore / 100).toFixed(1)}/5.0  (${rep.feedbackCount} reviews)\n`));
+      console.log(
+        chalk.bold(
+          `\nReputation: ${(rep.averageScore / 100).toFixed(1)}/5.0  (${
+            rep.feedbackCount
+          } reviews)\n`
+        )
+      );
     } else {
       console.log(chalk.gray("\nNo reputation yet.\n"));
     }
@@ -109,7 +155,11 @@ program
       console.log(chalk.bold("Recent Feedback:"));
       for (const fb of feedbacks.slice(0, 10)) {
         const stars = "★".repeat(fb.value) + "☆".repeat(5 - fb.value);
-        console.log(`  ${chalk.yellow(stars)}  "${fb.tag}"  ${chalk.gray(new Date(fb.createdAt * 1000).toLocaleDateString())}`);
+        console.log(
+          `  ${chalk.yellow(stars)}  "${fb.tag}"  ${chalk.gray(
+            new Date(fb.createdAt * 1000).toLocaleDateString()
+          )}`
+        );
       }
     }
   });
@@ -125,14 +175,25 @@ program
     for (const t of tasks.reverse()) {
       const agent = agents.find((a) => a.agentId === t.agentId);
       const agentName = agent ? getAgentName(agent) : `Agent #${t.agentId}`;
-      const statusColor = t.status === "open" ? chalk.blue : t.status === "completed" ? chalk.green : t.status === "claimed" ? chalk.yellow : chalk.gray;
+      const statusColor =
+        t.status === "open"
+          ? chalk.blue
+          : t.status === "completed"
+          ? chalk.green
+          : t.status === "claimed"
+          ? chalk.yellow
+          : chalk.gray;
       console.log(
         chalk.bold(`Task #${t.taskId}`) +
-        statusColor(` [${t.status}]`) +
-        chalk.gray(`  ${(t.amount / 1_000_000).toFixed(2)} USDC`) +
-        chalk.gray(`  → ${agentName}`)
+          statusColor(` [${t.status}]`) +
+          chalk.gray(`  ${(t.amount / 1_000_000).toFixed(2)} USDC`) +
+          chalk.gray(`  → ${agentName}`)
       );
-      console.log(chalk.gray(`  Deadline: ${new Date(t.deadline * 1000).toLocaleDateString()}`));
+      console.log(
+        chalk.gray(
+          `  Deadline: ${new Date(t.deadline * 1000).toLocaleDateString()}`
+        )
+      );
       console.log();
     }
   });
@@ -152,7 +213,11 @@ program
   .action(async (opts) => {
     const wallet = getWallet();
     console.log(chalk.gray("Wallet:"), wallet.publicKey.toBase58());
-    console.log(chalk.gray("Balance:"), (await getSOLBalance(connection, wallet.publicKey)).toFixed(4), "SOL\n");
+    console.log(
+      chalk.gray("Balance:"),
+      (await getSOLBalance(connection, wallet.publicKey)).toFixed(4),
+      "SOL\n"
+    );
 
     const metadata: Record<string, string> = {
       name: opts.name,
@@ -164,7 +229,12 @@ program
       description: opts.desc || "",
     };
 
-    const { tx, agentId } = await buildRegisterAgentTx(connection, wallet.publicKey, opts.uri, metadata);
+    const { tx, agentId } = await buildRegisterAgentTx(
+      connection,
+      wallet.publicKey,
+      opts.uri,
+      metadata
+    );
     console.log(chalk.blue(`Registering agent #${agentId}...`));
 
     const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
@@ -191,8 +261,16 @@ program
       process.exit(1);
     }
 
-    const { tx, taskId } = await buildCreateTaskTx(connection, wallet.publicKey, opts.agent, opts.amount, opts.uri);
-    console.log(chalk.blue(`Creating task #${taskId} for agent #${opts.agent}...`));
+    const { tx, taskId } = await buildCreateTaskTx(
+      connection,
+      wallet.publicKey,
+      opts.agent,
+      opts.amount,
+      opts.uri
+    );
+    console.log(
+      chalk.blue(`Creating task #${taskId} for agent #${opts.agent}...`)
+    );
 
     const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
     console.log(chalk.green("✅ Task created!"));
@@ -216,11 +294,49 @@ program
       process.exit(1);
     }
 
-    const tx = await buildGiveFeedbackTx(connection, wallet.publicKey, opts.agent, opts.value, opts.tag, new PublicKey(agent.authority));
+    const tx = await buildGiveFeedbackTx(
+      connection,
+      wallet.publicKey,
+      opts.agent,
+      opts.value,
+      opts.tag,
+      new PublicKey(agent.authority)
+    );
     console.log(chalk.blue(`Submitting feedback for agent #${opts.agent}...`));
 
     const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
     console.log(chalk.green("✅ Feedback submitted!"));
+    console.log(chalk.gray("Tx:"), getTxUrl(sig));
+  });
+
+// ─── claim ───
+program
+  .command("claim")
+  .description("Agent claims an open task")
+  .requiredOption("--task <id>", "Task ID", parseInt)
+  .requiredOption("--agent <id>", "Agent ID", parseInt)
+  .action(async (opts) => {
+    const wallet = getWallet();
+    const agents = await fetchAgents();
+    const agent = agents.find((a) => a.agentId === opts.agent);
+    if (!agent) {
+      console.log(chalk.red(`Agent #${opts.agent} not found.`));
+      process.exit(1);
+    }
+
+    const tx = await buildClaimTaskTx(
+      connection,
+      wallet.publicKey,
+      opts.task,
+      opts.agent,
+      new PublicKey(agent.authority)
+    );
+    console.log(
+      chalk.blue(`Claiming task #${opts.task} as agent #${opts.agent}...`)
+    );
+
+    const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
+    console.log(chalk.green("✅ Task claimed!"));
     console.log(chalk.gray("Tx:"), getTxUrl(sig));
   });
 
@@ -239,7 +355,13 @@ program
       process.exit(1);
     }
 
-    const tx = await buildSubmitTaskTx(connection, wallet.publicKey, opts.task, opts.agent, new PublicKey(agent.authority));
+    const tx = await buildSubmitTaskTx(
+      connection,
+      wallet.publicKey,
+      opts.task,
+      opts.agent,
+      new PublicKey(agent.authority)
+    );
     console.log(chalk.blue(`Submitting task #${opts.task} for review...`));
 
     const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
@@ -258,9 +380,28 @@ program
   .option("--tag <tag>", "Feedback tag", "excellent")
   .action(async (opts) => {
     const wallet = getWallet();
+    const agents = await fetchAgents();
+    const agent = agents.find((a) => a.agentId === opts.agent);
+    if (!agent) {
+      console.log(chalk.red(`Agent #${opts.agent} not found.`));
+      process.exit(1);
+    }
 
-    const tx = await buildAcceptTaskTx(connection, wallet.publicKey, opts.task, opts.agent, parseInt(opts.value), opts.tag);
-    console.log(chalk.blue(`Accepting task #${opts.task} and releasing funds...`));
+    const tx = await buildAcceptTaskTx(
+      connection,
+      wallet.publicKey,
+      opts.task,
+      opts.agent,
+      new PublicKey(agent.authority),
+      agent.wallet && agent.wallet !== DEFAULT_PUBKEY
+        ? new PublicKey(agent.wallet)
+        : null,
+      parseInt(opts.value),
+      opts.tag
+    );
+    console.log(
+      chalk.blue(`Accepting task #${opts.task} and releasing funds...`)
+    );
 
     const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
     console.log(chalk.green("✅ Task accepted! Funds released to agent."));
@@ -273,11 +414,20 @@ program
   .command("dispute")
   .description("Client disputes submitted work — locks funds")
   .requiredOption("--task <id>", "Task ID", parseInt)
-  .option("--reason <reason>", "Dispute reason", "Work does not meet requirements")
+  .option(
+    "--reason <reason>",
+    "Dispute reason",
+    "Work does not meet requirements"
+  )
   .action(async (opts) => {
     const wallet = getWallet();
 
-    const tx = await buildDisputeTaskTx(connection, wallet.publicKey, opts.task, opts.reason);
+    const tx = await buildDisputeTaskTx(
+      connection,
+      wallet.publicKey,
+      opts.task,
+      opts.reason
+    );
     console.log(chalk.blue(`Disputing task #${opts.task}...`));
 
     const sig = await sendTxRobust(tx, connection, fakeAdapter(wallet));
@@ -292,23 +442,36 @@ program
   .description("Start MCP server for AI agent integration")
   .action(async () => {
     console.log(chalk.blue("Starting TrustGrid MCP server..."));
-    console.log(chalk.gray("This gives AI agents 6 tools to interact with TrustGrid.\n"));
+    console.log(
+      chalk.gray("This gives AI agents 6 tools to interact with TrustGrid.\n")
+    );
 
     // Simple stdio MCP server
     const tools = [
-      { name: "trustgrid_list_agents", description: "List all registered agents" },
+      {
+        name: "trustgrid_list_agents",
+        description: "List all registered agents",
+      },
       { name: "trustgrid_get_agent", description: "Get agent details by ID" },
       { name: "trustgrid_list_tasks", description: "List all tasks" },
       { name: "trustgrid_register_agent", description: "Register a new agent" },
-      { name: "trustgrid_hire_agent", description: "Create a task to hire an agent" },
-      { name: "trustgrid_give_feedback", description: "Submit feedback for an agent" },
+      {
+        name: "trustgrid_hire_agent",
+        description: "Create a task to hire an agent",
+      },
+      {
+        name: "trustgrid_give_feedback",
+        description: "Submit feedback for an agent",
+      },
     ];
 
     console.log(chalk.bold("Available tools:"));
     for (const t of tools) {
       console.log(`  ${chalk.cyan(t.name)} — ${t.description}`);
     }
-    console.log(chalk.gray("\nMCP server running on stdio. Connect your AI client.\n"));
+    console.log(
+      chalk.gray("\nMCP server running on stdio. Connect your AI client.\n")
+    );
 
     // Keep process alive
     process.stdin.resume();

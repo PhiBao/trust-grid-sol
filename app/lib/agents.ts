@@ -40,7 +40,24 @@ interface RawFeedback {
   index: number;
 }
 
-export type TaskStatus = 'open' | 'claimed' | 'submitted' | 'completed' | 'cancelled' | 'expired' | 'disputed';
+const AGENT_IDENTITY_SIZE =
+  8 + // account discriminator
+  8 + // agent_id
+  32 + // authority
+  (4 + 200) + // agent_uri
+  (4 + 20 * (4 + 50 + 4 + 200)) + // metadata Vec<(String, String)>
+  32 + // wallet
+  1 + // active
+  8; // created_at
+
+export type TaskStatus =
+  | "open"
+  | "claimed"
+  | "submitted"
+  | "completed"
+  | "cancelled"
+  | "expired"
+  | "disputed";
 
 export interface Task {
   taskId: number;
@@ -57,7 +74,10 @@ export interface Task {
   disputeReason: string | null;
 }
 
-function readString(data: Buffer, offset: number): { value: string; nextOffset: number } {
+function readString(
+  data: Buffer,
+  offset: number
+): { value: string; nextOffset: number } {
   const len = data.readUInt32LE(offset);
   const value = data.slice(offset + 4, offset + 4 + len).toString("utf-8");
   return { value, nextOffset: offset + 4 + len };
@@ -89,7 +109,16 @@ function decodeAgent(data: Buffer, pda: PublicKey): OnChainAgent | null {
     const active = data[offset] !== 0;
     offset += 1;
     const createdAt = Number(data.readBigInt64LE(offset));
-    return { agentId, authority, agentUri, metadata, wallet, active, createdAt, pda: pda.toBase58() };
+    return {
+      agentId,
+      authority,
+      agentUri,
+      metadata,
+      wallet,
+      active,
+      createdAt,
+      pda: pda.toBase58(),
+    };
   } catch (e) {
     console.error("Failed to decode agent:", e);
     return null;
@@ -133,16 +162,26 @@ function decodeTask(data: Buffer): Task | null {
     offset = uriResult.nextOffset;
     const statusCode = data[offset];
     offset += 1;
-    const statusMap: Record<number, TaskStatus> = { 
-      0: 'open', 1: 'claimed', 2: 'submitted', 3: 'completed', 
-      4: 'cancelled', 5: 'expired', 6: 'disputed' 
+    const statusMap: Record<number, TaskStatus> = {
+      0: "open",
+      1: "claimed",
+      2: "submitted",
+      3: "completed",
+      4: "cancelled",
+      5: "expired",
+      6: "disputed",
     };
-    const status = statusMap[statusCode] || 'open';
+    const status = statusMap[statusCode] || "open";
     const claimedByDisc = data[offset];
     offset += 1;
-    const claimedBy = claimedByDisc === 1 ? new PublicKey(data.slice(offset, offset + 32)).toBase58() : null;
+    const claimedBy =
+      claimedByDisc === 1
+        ? new PublicKey(data.slice(offset, offset + 32)).toBase58()
+        : null;
     offset += claimedByDisc === 1 ? 32 : 0;
-    const escrowVault = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+    const escrowVault = new PublicKey(
+      data.slice(offset, offset + 32)
+    ).toBase58();
     offset += 32;
     const submittedAt = Number(data.readBigInt64LE(offset));
     offset += 8;
@@ -154,7 +193,20 @@ function decodeTask(data: Buffer): Task | null {
       disputeReason = reasonResult.value;
       offset = reasonResult.nextOffset;
     }
-    return { taskId, client, agentId, tokenMint, amount, deadline, taskUri, status, claimedBy, escrowVault, submittedAt, disputeReason };
+    return {
+      taskId,
+      client,
+      agentId,
+      tokenMint,
+      amount,
+      deadline,
+      taskUri,
+      status,
+      claimedBy,
+      escrowVault,
+      submittedAt,
+      disputeReason,
+    };
   } catch (e) {
     console.error("Failed to decode task:", e);
     return null;
@@ -193,7 +245,10 @@ function tryDecodeFeedback(data: Buffer): RawFeedback | null {
 
 export async function fetchAgentCounter(): Promise<number> {
   const connection = new Connection(RPC_URL, "confirmed");
-  const [counterPda] = PublicKey.findProgramAddressSync([Buffer.from("agent_counter")], PROGRAM_ID);
+  const [counterPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("agent_counter")],
+    PROGRAM_ID
+  );
   const account = await connection.getAccountInfo(counterPda);
   if (!account) return 0;
   return Number(account.data.readBigUInt64LE(8));
@@ -201,44 +256,76 @@ export async function fetchAgentCounter(): Promise<number> {
 
 export async function fetchTaskCounter(): Promise<number> {
   const connection = new Connection(RPC_URL, "confirmed");
-  const [counterPda] = PublicKey.findProgramAddressSync([Buffer.from("task_counter")], PROGRAM_ID);
+  const [counterPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("task_counter")],
+    PROGRAM_ID
+  );
   const account = await connection.getAccountInfo(counterPda);
   if (!account) return 0;
   return Number(account.data.readBigUInt64LE(8));
 }
 
-export async function fetchAgents(authority?: PublicKey): Promise<OnChainAgent[]> {
+export async function fetchAgents(
+  authority?: PublicKey
+): Promise<OnChainAgent[]> {
   const connection = new Connection(RPC_URL, "confirmed");
-  const auth = authority || new PublicKey("FzjHztL4TYQaNKQGVHV5VRAG1MVp2cvHuSN6mmduBcL3");
+
+  if (!authority) {
+    const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
+      commitment: "confirmed",
+      filters: [{ dataSize: AGENT_IDENTITY_SIZE }],
+    });
+    return accounts
+      .map(({ pubkey, account }) => decodeAgent(account.data, pubkey))
+      .filter((agent): agent is OnChainAgent => Boolean(agent?.active))
+      .sort((a, b) => a.agentId - b.agentId);
+  }
+
+  const auth = authority;
   const counter = await fetchAgentCounter();
   if (counter === 0) return [];
   const agents: OnChainAgent[] = [];
   for (let i = 1; i <= counter; i++) {
-    const [agentPda] = PublicKey.findProgramAddressSync([
-      Buffer.from("agent"), auth.toBuffer(), Buffer.from(new Uint8Array(new BigUint64Array([BigInt(i)]).buffer)),
-    ], PROGRAM_ID);
+    const [agentPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("agent"),
+        auth.toBuffer(),
+        Buffer.from(new Uint8Array(new BigUint64Array([BigInt(i)]).buffer)),
+      ],
+      PROGRAM_ID
+    );
     try {
       const account = await connection.getAccountInfo(agentPda);
       if (account && account.data.length > 8) {
         const agent = decodeAgent(account.data, agentPda);
         if (agent && agent.active) agents.push(agent);
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
   return agents;
 }
 
-export async function fetchReputation(agentId: number): Promise<AgentReputation | null> {
+export async function fetchReputation(
+  agentId: number
+): Promise<AgentReputation | null> {
   const connection = new Connection(RPC_URL, "confirmed");
-  const [repPda] = PublicKey.findProgramAddressSync([
-    Buffer.from("reputation"), Buffer.from(new Uint8Array(new BigUint64Array([BigInt(agentId)]).buffer)),
-  ], PROGRAM_ID);
+  const [repPda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("reputation"),
+      Buffer.from(new Uint8Array(new BigUint64Array([BigInt(agentId)]).buffer)),
+    ],
+    PROGRAM_ID
+  );
   const account = await connection.getAccountInfo(repPda);
   if (!account || account.data.length <= 8) return null;
   return decodeReputation(account.data);
 }
 
-export async function fetchFeedbacksForAgent(agentId: number): Promise<Feedback[]> {
+export async function fetchFeedbacksForAgent(
+  agentId: number
+): Promise<Feedback[]> {
   const connection = new Connection(RPC_URL, "confirmed");
   const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
     commitment: "confirmed",
@@ -260,16 +347,22 @@ export async function fetchTasks(): Promise<Task[]> {
   if (counter === 0) return [];
   const tasks: Task[] = [];
   for (let i = 1; i <= counter; i++) {
-    const [taskPda] = PublicKey.findProgramAddressSync([
-      Buffer.from("task"), Buffer.from(new Uint8Array(new BigUint64Array([BigInt(i)]).buffer)),
-    ], PROGRAM_ID);
+    const [taskPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("task"),
+        Buffer.from(new Uint8Array(new BigUint64Array([BigInt(i)]).buffer)),
+      ],
+      PROGRAM_ID
+    );
     try {
       const account = await connection.getAccountInfo(taskPda);
       if (account && account.data.length > 8) {
         const task = decodeTask(account.data);
         if (task) tasks.push(task);
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
   return tasks;
 }

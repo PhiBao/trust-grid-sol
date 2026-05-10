@@ -123,7 +123,9 @@ app.listen(PORT, () => {
   console.log(`TrustGrid x402 Facilitator running on port ${PORT}`);
   console.log("Supported endpoints:");
   Object.keys(priceMap).forEach((route) => {
-    console.log(`  ${route} - ${priceMap[route as keyof typeof priceMap].amount} USDC`);
+    console.log(
+      `  ${route} - ${priceMap[route as keyof typeof priceMap].amount} USDC`
+    );
   });
 });
 

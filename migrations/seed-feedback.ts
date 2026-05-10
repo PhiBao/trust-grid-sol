@@ -1,21 +1,39 @@
-import { Connection, PublicKey, Keypair, Transaction, SystemProgram, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  Keypair,
+  Transaction,
+  SystemProgram,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import * as fs from "fs";
 
 /**
  * Submit feedback using a second wallet (avoids self-feedback restriction).
  */
 
-const PROGRAM_ID = new PublicKey("2Ps1h8YwCTxLo6bHiCaN3xT2r8mdj5qP4hxUPrVoCszE");
-const RPC_URL = process.env.ANCHOR_PROVIDER_URL || "https://api.devnet.solana.com";
+const PROGRAM_ID = new PublicKey(
+  "2Ps1h8YwCTxLo6bHiCaN3xT2r8mdj5qP4hxUPrVoCszE"
+);
+const RPC_URL =
+  process.env.ANCHOR_PROVIDER_URL || "https://api.devnet.solana.com";
 const WALLET_PATH = process.env.FEEDBACK_WALLET || "/tmp/demo-wallet.json";
 
-const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(WALLET_PATH, "utf-8")));
+const secretKey = Uint8Array.from(
+  JSON.parse(fs.readFileSync(WALLET_PATH, "utf-8"))
+);
 const wallet = Keypair.fromSecretKey(secretKey);
 const connection = new Connection(RPC_URL, "confirmed");
 
 const crypto = require("crypto");
 function disc(name: string): Buffer {
-  return Buffer.from(crypto.createHash("sha256").update("global:" + name).digest().slice(0, 8));
+  return Buffer.from(
+    crypto
+      .createHash("sha256")
+      .update("global:" + name)
+      .digest()
+      .slice(0, 8)
+  );
 }
 
 const D_FEEDBACK = disc("give_feedback");
@@ -59,11 +77,20 @@ async function giveFeedback(agentId: number, value: number, tag: string) {
   }
 
   const [feedbackPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("feedback"), toU64LE(agentId), wallet.publicKey.toBuffer(), toU64LE(feedbackCount)],
+    [
+      Buffer.from("feedback"),
+      toU64LE(agentId),
+      wallet.publicKey.toBuffer(),
+      toU64LE(feedbackCount),
+    ],
     PROGRAM_ID
   );
 
-  const agentPda = getPda([Buffer.from("agent"), new PublicKey("FzjHztL4TYQaNKQGVHV5VRAG1MVp2cvHuSN6mmduBcL3").toBuffer(), toU64LE(agentId)]);
+  const agentPda = getPda([
+    Buffer.from("agent"),
+    new PublicKey("FzjHztL4TYQaNKQGVHV5VRAG1MVp2cvHuSN6mmduBcL3").toBuffer(),
+    toU64LE(agentId),
+  ]);
 
   const data = Buffer.concat([
     D_FEEDBACK,
@@ -71,21 +98,33 @@ async function giveFeedback(agentId: number, value: number, tag: string) {
     writeString(tag),
   ]);
 
-  const sig = await sendIX([
-    { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
-    { pubkey: agentPda, isSigner: false, isWritable: false },
-    { pubkey: repPda, isSigner: false, isWritable: true },
-    { pubkey: feedbackPda, isSigner: false, isWritable: true },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-  ], data);
+  const sig = await sendIX(
+    [
+      { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+      { pubkey: agentPda, isSigner: false, isWritable: false },
+      { pubkey: repPda, isSigner: false, isWritable: true },
+      { pubkey: feedbackPda, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data
+  );
 
-  console.log(`   ✅ Feedback for #${agentId}: ${value}★ "${tag}" — ${sig.slice(0, 20)}...`);
+  console.log(
+    `   ✅ Feedback for #${agentId}: ${value}★ "${tag}" — ${sig.slice(
+      0,
+      20
+    )}...`
+  );
 }
 
 async function main() {
   console.log("🔌 RPC:", RPC_URL);
   console.log("👛 Wallet:", wallet.publicKey.toBase58());
-  console.log("💰 Balance:", (await connection.getBalance(wallet.publicKey) / 1e9).toFixed(4), "SOL");
+  console.log(
+    "💰 Balance:",
+    ((await connection.getBalance(wallet.publicKey)) / 1e9).toFixed(4),
+    "SOL"
+  );
 
   const feedbacks = [
     { agent: 1, value: 5, tag: "excellent" },
@@ -107,7 +146,9 @@ async function main() {
     try {
       await giveFeedback(f.agent, f.value, f.tag);
     } catch (e: any) {
-      console.log(`   ⚠️  Feedback ${f.agent} skipped: ${e.toString().slice(0, 100)}`);
+      console.log(
+        `   ⚠️  Feedback ${f.agent} skipped: ${e.toString().slice(0, 100)}`
+      );
     }
   }
 

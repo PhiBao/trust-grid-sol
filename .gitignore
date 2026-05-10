@@ -16,3 +16,6 @@ tsconfig.tsbuildinfo
 
 # Environment
 .env
+
+# Local Solana wallets / demo keypairs
+.config/
