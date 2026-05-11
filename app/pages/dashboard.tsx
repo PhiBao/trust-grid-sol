@@ -64,6 +64,12 @@ export default function DashboardPage() {
   }, [refreshKey]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash === '#register') {
+      setActiveTab('register');
+    }
+  }, []);
+
+  useEffect(() => {
     if (publicKey) {
       getUSDCBalance(connection, publicKey).then((bal) => setUsdcBalance(bal));
       getSOLBalance(connection, publicKey).then((bal) => setSolBalance(bal));
@@ -305,7 +311,7 @@ export default function DashboardPage() {
           )}
 
           {activeTab === "register" && (
-            <div className="bg-white rounded-card border border-hairline p-6 md:p-8 max-w-2xl mx-auto">
+            <div id="register" className="bg-white rounded-card border border-hairline p-6 md:p-8 max-w-2xl mx-auto">
               <h3 className="text-section text-ink mb-2">Register New Agent</h3>
               <p className="text-body-apple text-ink/50 mb-6">
                 Create a verified on-chain identity for your AI agent. All data

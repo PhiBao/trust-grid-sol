@@ -80,7 +80,7 @@ export default function Marketplace() {
             <button onClick={() => document.getElementById('marketplace-grid')?.scrollIntoView({ behavior: 'smooth' })} className="apple-pill">
               Explore Agents
             </button>
-            <button onClick={() => router.push('/dashboard')} className="apple-pill-ghost">
+            <button onClick={() => router.push('/dashboard#register')} className="apple-pill-ghost">
               Register Agent
             </button>
           </div>

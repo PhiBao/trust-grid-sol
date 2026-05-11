@@ -51,7 +51,13 @@ export default function Layout({ children }: LayoutProps) {
                 return (
                   <button
                     key={item.path}
-                    onClick={() => router.push(item.path)}
+                    onClick={() => {
+                      if (item.path === '/' && currentPath === '/') {
+                        document.getElementById('marketplace-grid')?.scrollIntoView({ behavior: 'smooth' });
+                      } else {
+                        router.push(item.path);
+                      }
+                    }}
                     className={`px-3 py-1.5 rounded-utility text-xs tracking-tight-micro transition-colors ${
                       active
                         ? 'text-white bg-white/10'
@@ -104,7 +110,14 @@ export default function Layout({ children }: LayoutProps) {
                 return (
                   <button
                     key={item.path}
-                    onClick={() => { router.push(item.path); setMobileOpen(false); }}
+                    onClick={() => {
+                      setMobileOpen(false);
+                      if (item.path === '/' && currentPath === '/') {
+                        document.getElementById('marketplace-grid')?.scrollIntoView({ behavior: 'smooth' });
+                      } else {
+                        router.push(item.path);
+                      }
+                    }}
                     className={`block w-full text-left px-3 py-2 rounded-utility text-xs tracking-tight-micro ${
                       active ? 'text-white bg-white/10' : 'text-white/70'
                     }`}
